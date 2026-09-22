@@ -1,4 +1,4 @@
 flask==3.0.0
-py-clob-client=0.1.2
+py-clob-client==0.1.2
 requests==2.31.0
 
