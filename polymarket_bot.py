@@ -1,7 +1,7 @@
 import os
 import requests
 from flask import Flask, jsonify
-from pyclob.client import ClobClient
+from py_clob_client.client import ClobClient
 
 app = Flask(__name__)
 
