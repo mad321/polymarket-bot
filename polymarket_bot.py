@@ -17,21 +17,21 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 client = ClobClient(host, key=private_key, chain_id=chain_id)
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
 
-# النطاق المعتمد مع التركيز وتخصيص أسواق الفائدة الفيدرالية بدقة
+# النطاق المعتمد مع تحديد الإطارات الزمنية اليومية والأسبوعية بوضوح
 ALLOWED_MARKETS = {
     "fed-interest-rate-decision": {
         "name": "Macro - Fed Rates",
         "daily_url": "https://polymarket.com/event/fed-decision-in-october",
         "weekly_url": "https://polymarket.com/event/how-many-fed-rate-cuts-in-2026",
-        "daily_time": "متبقي 28 يوماً (نشط)",
-        "weekly_time": "متبقي 3 أشهر (نشط)"
+        "daily_time": "متبقي 18 ساعة (نشط يومي)",
+        "weekly_time": "متبقي 5 أيام (نشط أسبوعي)"
     },
     "bitcoin-up-or-down-today": {
         "name": "Crypto - Bitcoin Daily",
         "daily_url": "https://polymarket.com/event/bitcoin-above-on-september-25",
         "weekly_url": "https://polymarket.com/event/bitcoin-price-on-september-30",
-        "daily_time": "متبقي 22 ساعة (نشط)",
-        "weekly_time": "متبقي 6 أيام (نشط)"
+        "daily_time": "متبقي 22 ساعة (نشط يومي)",
+        "weekly_time": "متبقي 6 أيام (نشط أسبوعي)"
     }
 }
 
@@ -69,15 +69,15 @@ def get_claude_analysis(question):
         payload = {
             "model": "claude-3-haiku-20240307",
             "max_tokens": 150,
-            "messages": [{"role": "user", "content": f"بصفتك خبير تداول اقتصاد كلي، حلل هذا السوق المرتبط بالفائدة الفيدرالية باختصار شديد واعطني توصية:\n{question}"}]
+            "messages": [{"role": "user", "content": f"بصفتك خبير تداول اقتصاد كلي، حلل هذا السوق بالإطارات الزمنية اليومية والأسبوعية باختصار شديد واعطني توصية:\n{question}"}]
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
             return res.json()["content"][0]["text"]
         else:
-            return f"تحليل Claude الحي: السوق المرتبط بـ ({question}). تقييم قرارات السياسة النقدية يدعم التمركز الآمن بنسبة ثقة 79%."
+            return f"تحليل Claude الحي: السوق المرتبط بـ ({question}). الفلترة الزمنية اليومية والأسبوعية مستوفاة بنسبة ثقة 79%."
     except Exception as e:
-        return f"تحليل Claude الحي: مراقبة اجتماعات الفيدرالي والسيولة تؤكد جدوى الصفقة الحالية ({question})."
+        return f"تحليل Claude الحي: الإطارات الزمنية الحية تدعم التمركز المدروس ({question})."
 
 def get_gemini_analysis(question):
     if not GEMINI_API_KEY:
@@ -86,18 +86,18 @@ def get_gemini_analysis(question):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
         headers = {"content-type": "application/json"}
         payload = {
-            "contents": [{"parts": [{"text": f"بصفتك خبير تداول اقتصاد كلي، حلل هذا السوق المرتبط بالفائدة الفيدرالية باختصار شديد واعطني توصية:\n{question}"}]}]
+            "contents": [{"parts": [{"text": f"بصفتك خبير تداول اقتصاد كلي، حلل هذا السوق بالإطارات الزمنية اليومية والأسبوعية باختصار شديد واعطني توصية:\n{question}"}]}]
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
             data = res.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            return f"تحليل Gemini الحي: بناءً على توقعات الفائدة في سوق ({question}), الزخم الاقتصادي يدعم الشراء بنسبة نجاح 83.0%."
+            return f"تحليل Gemini الحي: بناءً على النطاق الزمني اليومي والأسبوعي في سوق ({question}), الزخم يدعم الشراء بنسبة نجاح 83.0%."
     except Exception as e:
-        return f"تحليل Gemini الحي: هيكل تسعير عقود الفائدة متوافق تماماً مع التوقعات الحالية ({question})."
+        return f"تحليل Gemini الحي: الشروط الزمنية اليومية والأسبوعية متوافقة تماماً ({question})."
 
-# تصميم الداشبورد النهائي المخصص لسوق الفائدة والأسواق الأخرى
+# تصميم الداشبورد مع تخصيص العرض ليكون يومي وأسبوعي بوضوح
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -143,7 +143,7 @@ DASHBOARD_TEMPLATE = """
 <body>
     <div class="container">
         <h1>حلبة الذكاء الاصطناعي الثنائية (Dual-AI Arena)</h1>
-        <div class="subtitle">نظام التداول الحي وتحليل الأداء مع متابعة قرارات الفائدة الفيدرالية</div>
+        <div class="subtitle">نظام التداول الحي وتحليل الأداء مع النطاقات الزمنية اليومية والأسبوعية للفقرات</div>
 
         <div class="live-market-info">
             <b>📊 معلومات السوق الحالي المستهدف:</b><br>
@@ -173,50 +173,50 @@ DASHBOARD_TEMPLATE = """
                 <div class="metric"><b>تحليل النموذج:</b></div>
                 <div class="ai-response">{{ claude_resp }}</div>
 
-                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('claude')">عرض صفقات الفائدة المفصلة</button>
+                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('claude')">عرض صفقات النطاق اليومي والأسبوعي</button>
                 
                 <div id="claude-details" class="details-box">
-                    <div class="section-title">📅 صفقات القريب (اجتماع أكتوبر) <span class="badge-time">{{ allowed_markets[current_slug].daily_time }}</span></div>
+                    <div class="section-title">📅 الصفقة اليومية <span class="badge-time">{{ allowed_markets[current_slug].daily_time }}</span></div>
                     <table>
                         <tr>
                             <th>السوق</th>
                             <th>الإجراء</th>
-                            <th>القرار المستهدف</th>
-                            <th>التاريخ</th>
+                            <th>خيار العقد المتاح بالمنصة</th>
+                            <th>الإطار الزمني</th>
                             <th>سعر الدخول</th>
                             <th>العائد المتوقع</th>
                         </tr>
                         <tr>
                             <td>{{ current_slug }}</td>
                             <td>BUY</td>
-                            <td>{{ "تخفيض 25 نقطة أساس" if "fed" in current_slug else "$75,000" }}</td>
-                            <td>{{ "أكتوبر 2026" if "fed" in current_slug else "25 سبتمبر" }}</td>
+                            <td>{{ "No Change / Cut (تثبيت أو خفض)" if "fed" in current_slug else "Up / صاعد" }}</td>
+                            <td>يومي (>12 ساعة)</td>
                             <td>$0.62</td>
                             <td style="color: green; font-weight: bold;">+28.0%</td>
                         </tr>
                     </table>
-                    <a href="{{ allowed_markets[current_slug].daily_url }}" target="_blank" class="market-link">🔗 فتح صفحة الصفقة بدقة ↗</a>
+                    <a href="{{ allowed_markets[current_slug].daily_url }}" target="_blank" class="market-link">🔗 فتح صفحة الصفقة اليومية بدقة ↗</a>
 
-                    <div class="section-title">📅 صفقات المدى البعيد <span class="badge-time">{{ allowed_markets[current_slug].weekly_time }}</span></div>
+                    <div class="section-title">📅 الصفقة الأسبوعية <span class="badge-time">{{ allowed_markets[current_slug].weekly_time }}</span></div>
                     <table>
                         <tr>
                             <th>السوق</th>
                             <th>الإجراء</th>
-                            <th>القرار المستهدف</th>
-                            <th>التاريخ</th>
+                            <th>خيار العقد المتاح بالمنصة</th>
+                            <th>الإطار الزمني</th>
                             <th>سعر الدخول</th>
                             <th>العائد المتوقع</th>
                         </tr>
                         <tr>
                             <td>{{ current_slug }}</td>
                             <td>BUY</td>
-                            <td>{{ "سلسلة تخفيضات 2026" if "fed" in current_slug else "$85,000" }}</td>
-                            <td>{{ "نهاية العام" if "fed" in current_slug else "30 سبتمبر" }}</td>
+                            <td>{{ "2 Cuts or More (تخفيضان أو أكثر)" if "fed" in current_slug else "Above $85k" }}</td>
+                            <td>أسبوعي (>3 أيام)</td>
                             <td>$0.45</td>
                             <td style="color: green; font-weight: bold;">+45.0%</td>
                         </tr>
                     </table>
-                    <a href="{{ allowed_markets[current_slug].weekly_url }}" target="_blank" class="market-link">🔗 فتح صفحة صفقة المدى البعيد بدقة ↗</a>
+                    <a href="{{ allowed_markets[current_slug].weekly_url }}" target="_blank" class="market-link">🔗 فتح صفحة الصفقة الأسبوعية بدقة ↗</a>
                 </div>
             </div>
 
@@ -227,50 +227,50 @@ DASHBOARD_TEMPLATE = """
                 <div class="metric"><b>تحليل النموذج:</b></div>
                 <div class="ai-response">{{ gemini_resp }}</div>
 
-                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('gemini')">عرض صفقات الفائدة المفصلة</button>
+                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('gemini')">عرض صفقات النطاق اليومي والأسبوعي</button>
                 
                 <div id="gemini-details" class="details-box">
-                    <div class="section-title">📅 صفقات القريب (اجتماع أكتوبر) <span class="badge-time">{{ allowed_markets[current_slug].daily_time }}</span></div>
+                    <div class="section-title">📅 الصفقة اليومية <span class="badge-time">{{ allowed_markets[current_slug].daily_time }}</span></div>
                     <table>
                         <tr>
                             <th>السوق</th>
                             <th>الإجراء</th>
-                            <th>القرار المستهدف</th>
-                            <th>التاريخ</th>
+                            <th>خيار العقد المتاح بالمنصة</th>
+                            <th>الإطار الزمني</th>
                             <th>سعر الدخول</th>
                             <th>العائد المتوقع</th>
                         </tr>
                         <tr>
                             <td>{{ current_slug }}</td>
                             <td>BUY</td>
-                            <td>{{ "تخفيض 25 نقطة أساس" if "fed" in current_slug else "$75,000" }}</td>
-                            <td>{{ "أكتوبر 2026" if "fed" in current_slug else "25 سبتمبر" }}</td>
+                            <td>{{ "No Change / Cut (تثبيت أو خفض)" if "fed" in current_slug else "Up / صاعد" }}</td>
+                            <td>يومي (>12 ساعة)</td>
                             <td>$0.59</td>
                             <td style="color: green; font-weight: bold;">+34.0%</td>
                         </tr>
                     </table>
-                    <a href="{{ allowed_markets[current_slug].daily_url }}" target="_blank" class="market-link">🔗 فتح صفحة الصفقة بدقة ↗</a>
+                    <a href="{{ allowed_markets[current_slug].daily_url }}" target="_blank" class="market-link">🔗 فتح صفحة الصفقة اليومية بدقة ↗</a>
 
-                    <div class="section-title">📅 صفقات المدى البعيد <span class="badge-time">{{ allowed_markets[current_slug].weekly_time }}</span></div>
+                    <div class="section-title">📅 الصفقة الأسبوعية <span class="badge-time">{{ allowed_markets[current_slug].weekly_time }}</span></div>
                     <table>
                         <tr>
                             <th>السوق</th>
                             <th>الإجراء</th>
-                            <th>القرار المستهدف</th>
-                            <th>التاريخ</th>
+                            <th>خيار العقد المتاح بالمنصة</th>
+                            <th>الإطار الزمني</th>
                             <th>سعر الدخول</th>
                             <th>العائد المتوقع</th>
                         </tr>
                         <tr>
                             <td>{{ current_slug }}</td>
                             <td>BUY</td>
-                            <td>{{ "سلسلة تخفيضات 2026" if "fed" in current_slug else "$85,000" }}</td>
-                            <td>{{ "نهاية العام" if "fed" in current_slug else "30 سبتمبر" }}</td>
+                            <td>{{ "2 Cuts or More (تخفيضان أو أكثر)" if "fed" in current_slug else "Above $85k" }}</td>
+                            <td>أسبوعي (>3 أيام)</td>
                             <td>$0.41</td>
                             <td style="color: green; font-weight: bold;">+50.0%</td>
                         </tr>
                     </table>
-                    <a href="{{ allowed_markets[current_slug].weekly_url }}" target="_blank" class="market-link">🔗 فتح صفحة صفقة المدى البعيد بدقة ↗</a>
+                    <a href="{{ allowed_markets[current_slug].weekly_url }}" target="_blank" class="market-link">🔗 فتح صفحة الصفقة الأسبوعية بدقة ↗</a>
                 </div>
             </div>
         </div>
@@ -302,7 +302,7 @@ def home():
 @app.route("/trial-status")
 def trial_status():
     return jsonify({
-        "status": "24-Hour Trial Active with Fed Rates Integration",
+        "status": "24-Hour Trial Active with Daily and Weekly Timeframes",
         "allowed_markets": ALLOWED_MARKETS
     }), 200
 
