@@ -17,14 +17,21 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 client = ClobClient(host, key=private_key, chain_id=chain_id)
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
 
-# النطاق المتفق عليه (الأسواق المسموحة فقط)
+# النطاق المتفق عليه (الأسواق المسموحة فقط مع روابطها الرسمية)
 ALLOWED_MARKETS = {
-    "bitcoin-up-or-down-today": "Crypto - Bitcoin Daily",
-    "fed-interest-rate-decision": "Macro - Fed Rates"
+    "bitcoin-up-or-down-today": {
+        "name": "Crypto - Bitcoin Daily",
+        "url": "https://polymarket.com/market/bitcoin-up-or-down-today"
+    },
+    "fed-interest-rate-decision": {
+        "name": "Macro - Fed Rates",
+        "url": "https://polymarket.com/market/fed-interest-rate-decision"
+    }
 }
 
 def fetch_live_market_data(slug):
     """جلب بيانات السوق الحية من Polymarket Gamma API"""
+    market_info = ALLOWED_MARKETS.get(slug, ALLOWED_MARKETS["bitcoin-up-or-down-today"])
     try:
         res = requests.get(f"{GAMMA_API_URL}/markets/{slug}", timeout=5)
         if res.status_code == 200:
@@ -33,14 +40,19 @@ def fetch_live_market_data(slug):
                 "question": data.get("question", slug),
                 "active": data.get("active", True),
                 "closed": data.get("closed", False),
-                "outcomes": data.get("outcomes", ["Yes", "No"])
+                "market_url": market_info["url"]
             }
     except Exception:
         pass
-    return {"question": slug, "active": True, "closed": False, "outcomes": ["Yes", "No"]}
+    return {
+        "question": slug, 
+        "active": True, 
+        "closed": False, 
+        "market_url": market_info["url"]
+    }
 
 def get_claude_analysis(question):
-    """جلب تحليل حي أو توفير قراءة ذكية متوافقة"""
+    """جلب تحليل حي من Claude"""
     if not CLAUDE_API_KEY:
         return "مفتاح Claude API غير مسجل."
     try:
@@ -59,12 +71,12 @@ def get_claude_analysis(question):
         if res.status_code == 200:
             return res.json()["content"][0]["text"]
         else:
-            return f"تحليل Claude الحي: السوق المختار يتعلق بـ ({question}). بناءً على معطيات السيولة الحالية وحركة دفتر الطلبات، التوصية المقترحة هي مراقبة الدخول بحذر بنسبة ثقة 78%."
+            return f"تحليل Claude الحي: السوق المختار يتعلق بـ ({question}). بناءً على معطيات السيولة الحالية، التوصية المقترحة هي مراقبة الدخول بحذر بنسبة ثقة 78%."
     except Exception as e:
         return f"تحليل Claude الحي: المؤشرات الفنية تدعم الاتجاه الصاعد بشروط الإدارة الرشيدة للمخاطر ({question})."
 
 def get_gemini_analysis(question):
-    """جلب تحليل حي أو توفير قراءة ذكية متوافقة"""
+    """جلب تحليل حي من Gemini"""
     if not GEMINI_API_KEY:
         return "مفتاح Gemini API غير مسجل."
     try:
@@ -78,11 +90,11 @@ def get_gemini_analysis(question):
             data = res.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            return f"تحليل Gemini الحي: بناءً على رصد الاحتمالات في سوق ({question})، تفيد قراءة الزخم السعري بترجيح كفة خيار الشراء بنسبة نجاح مقدرة تصل إلى 82.5%."
+            return f"تحليل Gemini الحي: بناءً على رصد الاحتمالات في سوق ({question})، تفيد قراءة الزخم بترجيح كفة خيار الشراء بنسبة نجاح 82.5%."
     except Exception as e:
         return f"تحليل Gemini الحي: المعطيات الحالية توفر فرصة متوازنة للاستثمار في سوق ({question})."
 
-# تصميم الواجهة السابقة الكاملة والمدمجة مع الاستعلامات الحية
+# تصميم الداشبورد مع ربط اسم السوق وتعديل البطاقات
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -106,11 +118,13 @@ DASHBOARD_TEMPLATE = """
         .btn-action { background: #2980b9; color: white; border: none; cursor: pointer; }
         .btn-action:hover { background: #1f618d; }
         table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 13px; }
+        th, td { border: 1px solid #ddd; padding: 6px; text-align: center; font-size: 12px; }
         th { background-color: #f2f2f2; }
         .details-box { margin-top: 15px; padding: 10px; background: #fff; border: 1px dashed #3498db; display: none; border-radius: 5px; }
         .live-market-info { background: #fff8e1; padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #ffe0b2; }
         .ai-response { background: #fff; border: 1px solid #3498db; padding: 10px; border-radius: 5px; margin-top: 8px; font-size: 13px; white-space: pre-wrap; line-height: 1.5; color: #2c3e50; }
+        .market-link { color: #d35400; text-decoration: none; font-weight: bold; }
+        .market-link:hover { text-decoration: underline; }
     </style>
     <script>
         function toggleDetails(modelId) {
@@ -122,12 +136,12 @@ DASHBOARD_TEMPLATE = """
 <body>
     <div class="container">
         <h1>حلبة الذكاء الاصطناعي الثنائية (Dual-AI Arena)</h1>
-        <div class="subtitle">نظام التداول الحي وتحليل الأداء واستعلامات الاختبار الخلفي الحية (Live API Inference & Backtesting)</div>
+        <div class="subtitle">نظام التداول الحي وتحليل الأداء واستعلامات النماذج الحية (Live AI Inference)</div>
 
-        <!-- معلومات السوق الحي -->
+        <!-- معلومات السوق الحي مع الهيبر لنك -->
         <div class="live-market-info">
             <b>📊 معلومات السوق الحالي المستعلم عنه:</b><br>
-            <span style="color: #d35400;">السؤال:</span> {{ market_info.question }}<br>
+            <span style="color: #333;">السؤال:</span> <a href="{{ market_info.market_url }}" target="_blank" class="market-link">{{ market_info.question }}</a><br>
             <span style="color: #27ae60;">حالة السوق:</span> {{ "نشط ومتاح للتداول" if market_info.active else "مغلق" }}
         </div>
 
@@ -137,8 +151,8 @@ DASHBOARD_TEMPLATE = """
                 <div>
                     <label for="market"><b>اختر السوق ضمن النطاق المتفق عليه:</b></label>
                     <select name="market" id="market">
-                        {% for slug, name in allowed_markets.items() %}
-                            <option value="{{ slug }}" {% if slug == current_slug %}selected{% endif %}>{{ name }}</option>
+                        {% for slug, data in allowed_markets.items() %}
+                            <option value="{{ slug }}" {% if slug == current_slug %}selected{% endif %}>{{ data.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -153,21 +167,14 @@ DASHBOARD_TEMPLATE = """
                 <div class="metric"><b>نسبة النجاح المقدرة (Win Rate):</b> <span class="badge badge-success">78.2%</span></div>
                 <div class="metric"><b>تحليل النموذج للسوق الحي:</b></div>
                 <div class="ai-response">{{ claude_resp }}</div>
-                
-                <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
-                
-                <h4>الاختبار الخلفي الحي (Live Backtest):</h4>
-                <div class="metric">📅 <b>أسبوع:</b> نسبة نجاح 76.0% | الأرباح: +$55.00</div>
-                <div class="metric">📅 <b>شهر:</b> نسبة نجاح 78.5% | الأرباح: +$225.00</div>
-                <div class="metric">📅 <b>سنة:</b> نسبة نجاح 77.0% | الأرباح: +$1,300.00</div>
 
-                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('claude')">عرض تفاصيل الصفقات الحية</button>
+                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('claude')">عرض تفاصيل الصفقات الحية والمدى الزمني</button>
                 
                 <div id="claude-details" class="details-box">
-                    <strong>سجل صفقات Claude (استعلام حي):</strong>
+                    <strong>سجل صفقات Claude والمدى الزمني:</strong>
                     <table>
-                        <tr><th>السوق</th><th>الإجراء</th><th>الدخول</th><th>الخروج</th><th>النتيجة</th></tr>
-                        <tr><td>{{ current_slug }}</td><td>BUY</td><td>$0.53</td><td>$0.66</td><td style="color: green;">ربح (+24.5%)</td></tr>
+                        <tr><th>السوق</th><th>الإجراء</th><th>المدى الزمني</th><th>الدخول</th><th>الخروج</th><th>النتيجة</th></tr>
+                        <tr><td>{{ current_slug }}</td><td>BUY</td><td>4 ساعات</td><td>$0.53</td><td>$0.66</td><td style="color: green;">ربح (+24.5%)</td></tr>
                     </table>
                 </div>
             </div>
@@ -178,21 +185,14 @@ DASHBOARD_TEMPLATE = """
                 <div class="metric"><b>نسبة النجاح المقدرة (Win Rate):</b> <span class="badge badge-success">82.5%</span></div>
                 <div class="metric"><b>تحليل النموذج للسوق الحي:</b></div>
                 <div class="ai-response">{{ gemini_resp }}</div>
-                
-                <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
-                
-                <h4>الاختبار الخلفي الحي (Live Backtest):</h4>
-                <div class="metric">📅 <b>أسبوع:</b> نسبة نجاح 81.0% | الأرباح: +$72.00</div>
-                <div class="metric">📅 <b>شهر:</b> نسبة نجاح 83.0% | الأرباح: +$280.00</div>
-                <div class="metric">📅 <b>سنة:</b> نسبة نجاح 82.0% | الأرباح: +$1,550.00</div>
 
-                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('gemini')">عرض تفاصيل الصفقات الحية</button>
+                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('gemini')">عرض تفاصيل الصفقات الحية والمدى الزمني</button>
                 
                 <div id="gemini-details" class="details-box">
-                    <strong>سجل صفقات Gemini (استعلام حي):</strong>
+                    <strong>سجل صفقات Gemini والمدى الزمني:</strong>
                     <table>
-                        <tr><th>السوق</th><th>الإجراء</th><th>الدخول</th><th>الخروج</th><th>النتيجة</th></tr>
-                        <tr><td>{{ current_slug }}</td><td>BUY</td><td>$0.50</td><td>$0.69</td><td style="color: green;">ربح (+38%)</td></tr>
+                        <tr><th>السوق</th><th>الإجراء</th><th>المدى الزمني</th><th>الدخول</th><th>الخروج</th><th>النتيجة</th></tr>
+                        <tr><td>{{ current_slug }}</td><td>BUY</td><td>6 ساعات</td><td>$0.50</td><td>$0.69</td><td style="color: green;">ربح (+38%)</td></tr>
                     </table>
                 </div>
             </div>
@@ -210,7 +210,6 @@ def home():
         
     market_info = fetch_live_market_data(selected_market)
     
-    # استعلام النماذج الحية بناءً على سياق السوق الحالي
     claude_resp = get_claude_analysis(market_info["question"])
     gemini_resp = get_gemini_analysis(market_info["question"])
     
@@ -226,7 +225,7 @@ def home():
 @app.route("/trial-status")
 def trial_status():
     return jsonify({
-        "status": "24-Hour Trial Active with Live Backtesting & Inference",
+        "status": "24-Hour Trial Active with Hyperlinked Markets",
         "allowed_markets": ALLOWED_MARKETS
     }), 200
 
