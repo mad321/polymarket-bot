@@ -23,15 +23,15 @@ ALLOWED_MARKETS = {
     "fed-interest-rate-decision": "Macro - Fed Rates"
 }
 
-# بيانات محاكاة الاختبار الخلفي (Backtesting) لمدد مختلفة (أسبوع، شهر، سنة)
+# بيانات محاكاة الاختبار الخلفي (Backtesting) لمدد مختلفة
 BACKTEST_DATA = {
     "claude": {
         "win_rate": "76.5%",
         "total_pnl": "+$340.50",
         "periods": {
-            "1_week": {"trades": 28, "win_rate": "75.0%", "pnl": "+$52.00"},
-            "1_month": {"trades": 120, "win_rate": "77.5%", "pnl": "+$210.00"},
-            "1_year": {"trades": 1450, "win_rate": "76.0%", "pnl": "+$1,250.00"}
+            "week": {"trades": 28, "win_rate": "75.0%", "pnl": "+$52.00"},
+            "month": {"trades": 120, "win_rate": "77.5%", "pnl": "+$210.00"},
+            "year": {"trades": 1450, "win_rate": "76.0%", "pnl": "+$1,250.00"}
         },
         "trades_details": [
             {"id": 1, "market": "Bitcoin Daily", "action": "BUY", "entry": "$0.52", "exit": "$0.65", "result": "ربح (+25%)"},
@@ -42,9 +42,9 @@ BACKTEST_DATA = {
         "win_rate": "81.2%",
         "total_pnl": "+$410.00",
         "periods": {
-            "1_week": {"trades": 30, "win_rate": "80.0%", "pnl": "+$68.00"},
-            "1_month": {"trades": 135, "win_rate": "82.0%", "pnl": "+$260.00"},
-            "1_year": {"trades": 1520, "win_rate": "81.0%", "pnl": "+$1,480.00"}
+            "week": {"trades": 30, "win_rate": "80.0%", "pnl": "+$68.00"},
+            "month": {"trades": 135, "win_rate": "82.0%", "pnl": "+$260.00"},
+            "year": {"trades": 1520, "win_rate": "81.0%", "pnl": "+$1,480.00"}
         },
         "trades_details": [
             {"id": 1, "market": "Bitcoin Daily", "action": "BUY", "entry": "$0.51", "exit": "$0.68", "result": "ربح (+33%)"},
@@ -53,7 +53,7 @@ BACKTEST_DATA = {
     }
 }
 
-# تصميم الداشبورد المتقدم
+# تصميم الداشبورد المتقدم الآمن
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -121,9 +121,9 @@ DASHBOARD_TEMPLATE = """
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
                 
                 <h4>نتائج الاختبار الخلفي (Backtest):</h4>
-                <div class="metric">📅 <b>أسبوع:</b> نسبة نجاح {{ claude.periods.1_week.win_rate }} | عائل: {{ claude.periods.1_week.pnl }}</div>
-                <div class="metric">📅 <b>شهر:</b> نسبة نجاح {{ claude.periods.1_month.win_rate }} | عائل: {{ claude.periods.1_month.pnl }}</div>
-                <div class="metric">📅 <b>سنة:</b> نسبة نجاح {{ claude.periods.1_year.win_rate }} | عائل: {{ claude.periods.1_year.pnl }}</div>
+                <div class="metric">📅 <b>أسبوع:</b> نسبة نجاح {{ claude.periods.week.win_rate }} | عائل: {{ claude.periods.week.pnl }}</div>
+                <div class="metric">📅 <b>شهر:</b> نسبة نجاح {{ claude.periods.month.win_rate }} | عائل: {{ claude.periods.month.pnl }}</div>
+                <div class="metric">📅 <b>سنة:</b> نسبة نجاح {{ claude.periods.year.win_rate }} | عائل: {{ claude.periods.year.pnl }}</div>
 
                 <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('claude')">عرض تفاصيل الصفقات</button>
                 
@@ -153,9 +153,9 @@ DASHBOARD_TEMPLATE = """
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
                 
                 <h4>نتائج الاختبار الخلفي (Backtest):</h4>
-                <div class="metric">📅 <b>أسبوع:</b> نسبة نجاح {{ gemini.periods.1_week.win_rate }} | عائل: {{ gemini.periods.1_week.pnl }}</div>
-                <div class="metric">📅 <b>شهر:</b> نسبة نجاح {{ gemini.periods.1_month.win_rate }} | عائل: {{ gemini.periods.1_month.pnl }}</div>
-                <div class="metric">📅 <b>سنة:</b> نسبة نجاح {{ gemini.periods.1_year.win_rate }} | عائل: {{ gemini.periods.1_year.pnl }}</div>
+                <div class="metric">📅 <b>أسبوع:</b> نسبة نجاح {{ gemini.periods.week.win_rate }} | عائل: {{ gemini.periods.week.pnl }}</div>
+                <div class="metric">📅 <b>شهر:</b> نسبة نجاح {{ gemini.periods.month.win_rate }} | عائل: {{ gemini.periods.month.pnl }}</div>
+                <div class="metric">📅 <b>سنة:</b> نسبة نجاح {{ gemini.periods.year.win_rate }} | عائل: {{ gemini.periods.year.pnl }}</div>
 
                 <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('gemini')">عرض تفاصيل الصفقات</button>
                 
