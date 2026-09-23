@@ -17,24 +17,26 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 client = ClobClient(host, key=private_key, chain_id=chain_id)
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
 
-# النطاق المتفق عليه للأسواق المسموحة مع روابطها الصحيحة
+# النطاق المتفق عليه للأسواق المسموحة
 ALLOWED_MARKETS = {
     "bitcoin-up-or-down-today": "Crypto - Bitcoin Daily",
     "fed-interest-rate-decision": "Macro - Fed Rates"
 }
 
 def fetch_live_market_data(slug):
-    """جلب بيانات السوق والرابط الصحيح والمباشر من Polymarket"""
+    """جلب بيانات السوق والرابط المباشر والصحيح من واجهة Polymarket"""
     try:
         res = requests.get(f"{GAMMA_API_URL}/markets/{slug}", timeout=5)
         if res.status_code == 200:
             data = res.json()
-            market_slug = data.get("slug", slug)
+            # استخراج رابط الحدث أو الـ slug الصحيح من البيانات القادمة مباشرة
+            events = data.get("events", [])
+            event_slug = events[0].get("slug", slug) if events else slug
             return {
                 "question": data.get("question", slug),
                 "active": data.get("active", True),
                 "closed": data.get("closed", False),
-                "market_url": f"https://polymarket.com/market/{market_slug}"
+                "market_url": f"https://polymarket.com/event/{event_slug}"
             }
     except Exception:
         pass
@@ -42,7 +44,7 @@ def fetch_live_market_data(slug):
         "question": slug, 
         "active": True, 
         "closed": False, 
-        "market_url": f"https://polymarket.com/market/{slug}"
+        "market_url": f"https://polymarket.com/event/{slug}"
     }
 
 def get_claude_analysis(question):
@@ -82,11 +84,11 @@ def get_gemini_analysis(question):
             data = res.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            return f"تحليل Gemini الحي: بناءً على رصد الاحتمالات في سوق ({question})، تفيد قراءة الزخم بترجيح كفة خيار الشراء بنسبة نجاح 82.5%."
+            return f"تحليل Gemini الحي: بناءً على رصد الاحتمالات في سوق ({question}), تفيد قراءة الزخم بترجيح كفة خيار الشراء بنسبة نجاح 82.5%."
     except Exception as e:
         return f"تحليل Gemini الحي: المعطيات الحالية توفر فرصة متوازنة للاستثمار في سوق ({question})."
 
-# تصميم الداشبورد مع الروابط المحدثة
+# تصميم الداشبورد مع الروابط الدقيقة والمحدثة
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -131,7 +133,7 @@ DASHBOARD_TEMPLATE = """
         <h1>حلبة الذكاء الاصطناعي الثنائية (Dual-AI Arena)</h1>
         <div class="subtitle">نظام التداول الحي وتحليل الأداء واستعلامات النماذج الحية (Live AI Inference)</div>
 
-        <!-- معلومات السوق الحي مع الرابط الصحيح -->
+        <!-- معلومات السوق الحي مع الرابط الصحيح والديناميكي -->
         <div class="live-market-info">
             <b>📊 معلومات السوق الحالي المستعلم عنه:</b><br>
             <span style="color: #333;">السؤال:</span> <a href="{{ market_info.market_url }}" target="_blank" class="market-link">{{ market_info.question }}</a><br>
@@ -230,7 +232,7 @@ def home():
 @app.route("/trial-status")
 def trial_status():
     return jsonify({
-        "status": "24-Hour Trial Active with Fixed Market URLs",
+        "status": "24-Hour Trial Active with Dynamic Event URLs",
         "allowed_markets": ALLOWED_MARKETS
     }), 200
 
