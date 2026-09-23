@@ -50,7 +50,7 @@ def get_claude_analysis(question):
         payload = {
             "model": "claude-3-haiku-20240307",
             "max_tokens": 150,
-            "messages": [{"role": "user", "content": f"بصفتك خبير تداول، حلل هذا السوق واعطني توصية باختصار:\n{question}"}]
+            "messages": [{"role": "user", "content": f"بصفتك خبير تداول، حلل هذا السوق باختصار شديد واعطني توصية:\n{question}"}]
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
@@ -64,10 +64,11 @@ def get_gemini_analysis(question):
     if not GEMINI_API_KEY:
         return "مفتاح Gemini API غير مسجل."
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+        # استخدام الإصدار v1 مع نموذج gemini-1.5-flash المعتمد للـ API العام
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         headers = {"content-type": "application/json"}
         payload = {
-            "contents": [{"parts": [{"text": f"بصفتك خبير تداول، حلل هذا السوق واعطني توصية باختصار:\n{question}"}]}]
+            "contents": [{"parts": [{"text": f"بصفتك خبير تداول، حلل هذا السوق باختصار شديد واعطني توصية:\n{question}"}]}]
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
@@ -137,7 +138,7 @@ DASHBOARD_TEMPLATE = """
             </div>
 
             <div class="card">
-                <h3>Gemini Pro (Live API Inference)</h3>
+                <h3>Gemini Flash (Live API Inference)</h3>
                 <div class="metric"><b>حالة النموذج:</b> <span class="badge badge-success">متصل وفعّال</span></div>
                 <div class="metric"><b>تحليل السوق الحي والتوصية:</b></div>
                 <div class="ai-response">{{ gemini_resp }}</div>
