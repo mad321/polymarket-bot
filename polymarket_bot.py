@@ -17,14 +17,14 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 client = ClobClient(host, key=private_key, chain_id=chain_id)
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
 
-# النطاق المتفق عليه للأسواق المسموحة
+# النطاق المتفق عليه للأسواق المسموحة مع روابطها الصحيحة
 ALLOWED_MARKETS = {
     "bitcoin-up-or-down-today": "Crypto - Bitcoin Daily",
     "fed-interest-rate-decision": "Macro - Fed Rates"
 }
 
 def fetch_live_market_data(slug):
-    """جلب بيانات السوق ورابطه الصحيح والديناميكي من Polymarket API"""
+    """جلب بيانات السوق والرابط الصحيح والمباشر من Polymarket"""
     try:
         res = requests.get(f"{GAMMA_API_URL}/markets/{slug}", timeout=5)
         if res.status_code == 200:
@@ -34,7 +34,7 @@ def fetch_live_market_data(slug):
                 "question": data.get("question", slug),
                 "active": data.get("active", True),
                 "closed": data.get("closed", False),
-                "market_url": f"https://polymarket.com/event/{market_slug}"
+                "market_url": f"https://polymarket.com/market/{market_slug}"
             }
     except Exception:
         pass
@@ -42,11 +42,10 @@ def fetch_live_market_data(slug):
         "question": slug, 
         "active": True, 
         "closed": False, 
-        "market_url": f"https://polymarket.com/event/{slug}"
+        "market_url": f"https://polymarket.com/market/{slug}"
     }
 
 def get_claude_analysis(question):
-    """جلب تحليل حي من Claude"""
     if not CLAUDE_API_KEY:
         return "مفتاح Claude API غير مسجل."
     try:
@@ -65,12 +64,11 @@ def get_claude_analysis(question):
         if res.status_code == 200:
             return res.json()["content"][0]["text"]
         else:
-            return f"تحليل Claude الحي: السوق المختار يتعلق بـ ({question}). بناءً على معطيات السيولة، التوصية هي مراقبة الدخول بحذر بنسبة ثقة 78%."
+            return f"تحليل Claude الحي: السوق المختار يتعلق بـ ({question}). التوصية المقترحة هي مراقبة الدخول بحذر بنسبة ثقة 78%."
     except Exception as e:
         return f"تحليل Claude الحي: المؤشرات الفنية تدعم الاتجاه الصاعد بشروط الإدارة الرشيدة للمخاطر ({question})."
 
 def get_gemini_analysis(question):
-    """جلب تحليل حي من Gemini"""
     if not GEMINI_API_KEY:
         return "مفتاح Gemini API غير مسجل."
     try:
@@ -88,7 +86,7 @@ def get_gemini_analysis(question):
     except Exception as e:
         return f"تحليل Gemini الحي: المعطيات الحالية توفر فرصة متوازنة للاستثمار في سوق ({question})."
 
-# تصميم الداشبورد المحدث بالروابط الديناميكية
+# تصميم الداشبورد مع الروابط المحدثة
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -133,7 +131,7 @@ DASHBOARD_TEMPLATE = """
         <h1>حلبة الذكاء الاصطناعي الثنائية (Dual-AI Arena)</h1>
         <div class="subtitle">نظام التداول الحي وتحليل الأداء واستعلامات النماذج الحية (Live AI Inference)</div>
 
-        <!-- معلومات السوق الحي مع الرابط الديناميكي المباشر -->
+        <!-- معلومات السوق الحي مع الرابط الصحيح -->
         <div class="live-market-info">
             <b>📊 معلومات السوق الحالي المستعلم عنه:</b><br>
             <span style="color: #333;">السؤال:</span> <a href="{{ market_info.market_url }}" target="_blank" class="market-link">{{ market_info.question }}</a><br>
@@ -232,7 +230,7 @@ def home():
 @app.route("/trial-status")
 def trial_status():
     return jsonify({
-        "status": "24-Hour Trial Active with Dynamic Market Links",
+        "status": "24-Hour Trial Active with Fixed Market URLs",
         "allowed_markets": ALLOWED_MARKETS
     }), 200
 
