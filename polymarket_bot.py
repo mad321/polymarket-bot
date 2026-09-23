@@ -2,7 +2,7 @@ import os
 import requests
 from flask import Flask, jsonify, request
 from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import OrderArgs, BUY
+from py_clob_client.clob_types import OrderArgs
 
 app = Flask(__name__)
 
