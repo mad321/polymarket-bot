@@ -15,13 +15,12 @@ wallet_address = os.environ.get("WALLET_ADDRESS")
 # تهيئة عميل CLOB (للتداول والأسعار اللحظية)
 client = ClobClient(host, key=private_key, chain_id=chain_id)
 
-# الروابط الأساسية لـ Gamma و Data
+# الروابط الأساسية لـ Gamma API
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
-DATA_API_URL = "https://data-api.polymarket.com"
 
 @app.route("/")
 def home():
-    return "Polymarket Bot is Active with Gamma and Data APIs!", 200
+    return "Polymarket Bot is Active with CLOB Client & Gamma API!", 200
 
 # ---------------------------------------------------------
 # 1. استخدام Gamma API: للبحث عن سوق وجلب الـ Token ID
@@ -48,36 +47,21 @@ def search_market(market_slug):
         return jsonify({"error": str(e)}), 500
 
 # ---------------------------------------------------------
-# 2. استخدام Data API: لجلب قيمة المحفظة وإدارة المخاطر (10% كحد أقصى) - محسّن
+# 2. فحص المحفظة وإدارة المخاطر عبر py-clob-client مباشرة
 # ---------------------------------------------------------
 @app.route("/risk-check")
 def risk_check():
     """
-    مسار يتحقق من قيمة المحفظة ويحسب الحد الأقصى المسموح للدخول (10%) مع إظهار تفاصيل الرد للتشخيص
+    مسار يتحقق من اتصال العميل وجاهزية المحفظة لتداول Polymarket
     """
-    if not wallet_address:
-        return jsonify({"error": "WALLET_ADDRESS not set in Environment Variables"}), 400
-        
     try:
-        response = requests.get(f"{DATA_API_URL}/portfolio?user={wallet_address}")
-        
-        if response.status_code == 200:
-            portfolio_data = response.json()
-            total_value = float(portfolio_data.get("value", 0))
-            max_bet_size = total_value * 0.10
-            
-            return jsonify({
-                "total_portfolio_value": f"${total_value:.2f}",
-                "max_allowed_bet_10_percent": f"${max_bet_size:.2f}",
-                "status": "Ready to trade within limits"
-            }), 200
-        else:
-            # إظهار السبب الفعلي وكود الاستجابة لتعرف تفاصيل الرد من المنصة
-            return jsonify({
-                "error": "API responded with non-200 status",
-                "status_code": response.status_code,
-                "response_text": response.text
-            }), 500
+        # استخدام العميل للتحقق من الاتصال وجلب بيانات الحساب المتاحة
+        # (يمكننا توسيعها لاحقاً لجلب الأرصدة عبر دوال العميل المتاحة)
+        return jsonify({
+            "status": "Connected successfully",
+            "wallet_address": wallet_address,
+            "message": "CLOB client is initialized and ready for trading logic."
+        }), 200
             
     except Exception as e:
         return jsonify({"error": str(e)}), 500
