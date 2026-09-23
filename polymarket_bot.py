@@ -23,7 +23,7 @@ ALLOWED_MARKETS = {
     "fed-interest-rate-decision": "Macro - Fed Rates"
 }
 
-# بيانات محاكاة الاختبار الخلفي (Backtesting) لمدد مختلفة (أسبوع، شهر، سنة) والأداء الحالي
+# بيانات محاكاة الاختبار الخلفي (Backtesting) لمدد مختلفة (أسبوع، شهر، سنة)
 BACKTEST_DATA = {
     "claude": {
         "win_rate": "76.5%",
@@ -199,5 +199,5 @@ def trial_status():
     }), 200
 
 if __name__ == "__main__":
-    port = int(os.environ.com("PORT", 10000) if hasattr(os, "environ") else 10000)
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
