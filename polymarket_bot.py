@@ -40,7 +40,7 @@ def fetch_live_market_data(slug):
     return {"question": slug, "active": True, "closed": False, "outcomes": ["Yes", "No"]}
 
 def get_claude_analysis(question):
-    """استعلام حقيقي من نموذج Claude عبر الـ API"""
+    """استعلام حقيقي من نموذج Claude عبر الـ API الصحيح"""
     if not CLAUDE_API_KEY:
         return "مفتاح Claude API غير مسجل في متغيرات البيئة."
     try:
@@ -51,7 +51,7 @@ def get_claude_analysis(question):
             "content-type": "application/json"
         }
         payload = {
-            "model": "claude-3-haiku-20240307",
+            "model": "claude-3-5-haiku-20241022",
             "max_tokens": 150,
             "messages": [{"role": "user", "content": f"بصفتك خبير تداول ذكي، قم بتحليل هذا السوق باختصار شديد واعطني توصية (شراء نعم أو لا) مع النسبة المئوية للثقة:\n{question}"}]
         }
@@ -59,16 +59,16 @@ def get_claude_analysis(question):
         if res.status_code == 200:
             return res.json()["content"][0]["text"]
         else:
-            return f"خطأ في الاتصال بـ Claude API: {res.status_code}"
+            return f"خطأ في الاتصال بـ Claude API: {res.status_code} - {res.text}"
     except Exception as e:
         return f"فشل الاستعلام: {str(e)}"
 
 def get_gemini_analysis(question):
-    """استعلام حقيقي من نموذج Gemini عبر الـ API"""
+    """استعلام حقيقي من نموذج Gemini عبر الـ API الصحيح"""
     if not GEMINI_API_KEY:
         return "مفتاح Gemini API غير مسجل في متغيرات البيئة."
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         headers = {"content-type": "application/json"}
         payload = {
             "contents": [{"parts": [{"text": f"بصفتك خبير تداول ذكي، قم بتحليل هذا السوق باختصار شديد واعطني توصية (شراء نعم أو لا) مع النسبة المئوية للثقة:\n{question}"}]}]
@@ -78,7 +78,7 @@ def get_gemini_analysis(question):
             data = res.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            return f"خطأ في الاتصال بـ Gemini API: {res.status_code}"
+            return f"خطأ في الاتصال بـ Gemini API: {res.status_code} - {res.text}"
     except Exception as e:
         return f"فشل الاستعلام: {str(e)}"
 
