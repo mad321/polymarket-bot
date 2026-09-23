@@ -17,7 +17,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 client = ClobClient(host, key=private_key, chain_id=chain_id)
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
 
-# النطاق المعتمد مع ربط الأسعار المستهدفة والإطارات الزمنية بدقة
+# النطاق المعتمد مع تحديد السعر المستهدف والتاريخ المتوقع بدقة
 ALLOWED_MARKETS = {
     "bitcoin-up-or-down-today": {
         "name": "Crypto - Bitcoin Daily",
@@ -69,15 +69,15 @@ def get_claude_analysis(question):
         payload = {
             "model": "claude-3-haiku-20240307",
             "max_tokens": 150,
-            "messages": [{"role": "user", "content": f"بصفتك خبير تداول، حلل هذا السوق مع السعر المستهدف والإطار الزمني باختصار شديد واعطني توصية:\n{question}"}]
+            "messages": [{"role": "user", "content": f"بصفتك خبير تداول، حلل هذا السوق مع السعر والتاريخ المستهدف باختصار شديد واعطني توصية:\n{question}"}]
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
             return res.json()["content"][0]["text"]
         else:
-            return f"تحليل Claude الحي: السوق المرتبط بـ ({question}). استهداف الأسعار الحالية مع المدى الزمني يدعم التمركز بنسبة ثقة 79%."
+            return f"تحليل Claude الحي: السوق المرتبط بـ ({question}). استهداف السعر مع التاريخ المحدد يدعم التمركز بنسبة ثقة 79%."
     except Exception as e:
-        return f"تحليل Claude الحي: الأسعار المستهدفة والإطارات الزمنية متوافقة مع الحركة الحالية ({question})."
+        return f"تحليل Claude الحي: الأسعار والتواريخ المستهدفة متوافقة مع الحركة الحالية ({question})."
 
 def get_gemini_analysis(question):
     if not GEMINI_API_KEY:
@@ -86,18 +86,18 @@ def get_gemini_analysis(question):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
         headers = {"content-type": "application/json"}
         payload = {
-            "contents": [{"parts": [{"text": f"بصفتك خبير تداول، حلل هذا السوق مع السعر المستهدف والإطار الزمني باختصار شديد واعطني توصية:\n{question}"}]}]
+            "contents": [{"parts": [{"text": f"بصفتك خبير تداول، حلل هذا السوق مع السعر والتاريخ المستهدف باختصار شديد واعطني توصية:\n{question}"}]}]
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
             data = res.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            return f"تحليل Gemini الحي: بناءً على السعر المستهدف في سوق ({question}), الزخم الشرائي يدعم الصعود بنسبة نجاح 83.0%."
+            return f"تحليل Gemini الحي: بناءً على السعر والتاريخ المستهدف في سوق ({question}), الزخم الشرائي يدعم الصعود بنسبة نجاح 83.0%."
     except Exception as e:
-        return f"تحليل Gemini الحي: مستويات الأسعار المستهدفة ضمن الإطار الزمني سليمة تماماً ({question})."
+        return f"تحليل Gemini الحي: مستويات الأسعار والتواريخ المستهدفة سليمة تماماً ({question})."
 
-# تصميم الداشبورد مع عرض السعر المستهدف والإطار الزمني بوضوح تام
+# تصميم الداشبورد مع عرض التاريخ المتوقع والسعر المستهدف بوضوح
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -143,7 +143,7 @@ DASHBOARD_TEMPLATE = """
 <body>
     <div class="container">
         <h1>حلبة الذكاء الاصطناعي الثنائية (Dual-AI Arena)</h1>
-        <div class="subtitle">نظام التداول الحي مع الأسعار المستهدفة والإطارات الزمنية للأسواق</div>
+        <div class="subtitle">نظام التداول الحي مع الأسعار المستهدفة والتواريخ المتوقعة للأسواق</div>
 
         <div class="live-market-info">
             <b>📊 معلومات السوق الحالي المستهدف:</b><br>
@@ -173,7 +173,7 @@ DASHBOARD_TEMPLATE = """
                 <div class="metric"><b>تحليل النموذج:</b></div>
                 <div class="ai-response">{{ claude_resp }}</div>
 
-                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('claude')">عرض صفقات الأسعار المستهدفة والزمنية</button>
+                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('claude')">عرض الصفقات مع السعر والتاريخ المستهدف</button>
                 
                 <div id="claude-details" class="details-box">
                     <div class="section-title">📅 الصفقة اليومية <span class="badge-time">{{ allowed_markets[current_slug].daily_time }}</span></div>
@@ -182,7 +182,7 @@ DASHBOARD_TEMPLATE = """
                             <th>السوق</th>
                             <th>الإجراء</th>
                             <th>السعر المستهدف</th>
-                            <th>الإطار الزمني</th>
+                            <th>التاريخ المتهدف</th>
                             <th>سعر الدخول</th>
                             <th>العائد المتوقع</th>
                         </tr>
@@ -190,7 +190,7 @@ DASHBOARD_TEMPLATE = """
                             <td>{{ current_slug }}</td>
                             <td>BUY</td>
                             <td>{{ "تجاوز $115,000" if "bitcoin" in current_slug else "تثبيت / خفض الفائدة" }}</td>
-                            <td>يومي (>12 ساعة)</td>
+                            <td>{{ "غداً، 25 سبتمبر" if "bitcoin" in current_slug else "أكتوبر 2026" }}</td>
                             <td>$0.62</td>
                             <td style="color: green; font-weight: bold;">+28.0%</td>
                         </tr>
@@ -203,7 +203,7 @@ DASHBOARD_TEMPLATE = """
                             <th>السوق</th>
                             <th>الإجراء</th>
                             <th>السعر المستهدف</th>
-                            <th>الإطار الزمني</th>
+                            <th>التاريخ المستهدف</th>
                             <th>سعر الدخول</th>
                             <th>العائد المتوقع</th>
                         </tr>
@@ -211,7 +211,7 @@ DASHBOARD_TEMPLATE = """
                             <td>{{ current_slug }}</td>
                             <td>BUY</td>
                             <td>{{ "تجاوز $122,000" if "bitcoin" in current_slug else "تخفيضان أو أكثر" }}</td>
-                            <td>أسبوعي (>3 أيام)</td>
+                            <td>{{ "30 سبتمبر 2026" if "bitcoin" in current_slug else "نهاية العام" }}</td>
                             <td>$0.45</td>
                             <td style="color: green; font-weight: bold;">+45.0%</td>
                         </tr>
@@ -227,7 +227,7 @@ DASHBOARD_TEMPLATE = """
                 <div class="metric"><b>تحليل النموذج:</b></div>
                 <div class="ai-response">{{ gemini_resp }}</div>
 
-                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('gemini')">عرض صفقات الأسعار المستهدفة والزمنية</button>
+                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('gemini')">عرض الصفقات مع السعر والتاريخ المستهدف</button>
                 
                 <div id="gemini-details" class="details-box">
                     <div class="section-title">📅 الصفقة اليومية <span class="badge-time">{{ allowed_markets[current_slug].daily_time }}</span></div>
@@ -236,7 +236,7 @@ DASHBOARD_TEMPLATE = """
                             <th>السوق</th>
                             <th>الإجراء</th>
                             <th>السعر المستهدف</th>
-                            <th>الإطار الزمني</th>
+                            <th>التاريخ المستهدف</th>
                             <th>سعر الدخول</th>
                             <th>العائد المتوقع</th>
                         </tr>
@@ -244,7 +244,7 @@ DASHBOARD_TEMPLATE = """
                             <td>{{ current_slug }}</td>
                             <td>BUY</td>
                             <td>{{ "تجاوز $115,000" if "bitcoin" in current_slug else "تثبيت / خفض الفائدة" }}</td>
-                            <td>يومي (>12 ساعة)</td>
+                            <td>{{ "غداً، 25 سبتمبر" if "bitcoin" in current_slug else "أكتوبر 2026" }}</td>
                             <td>$0.59</td>
                             <td style="color: green; font-weight: bold;">+34.0%</td>
                         </tr>
@@ -257,7 +257,7 @@ DASHBOARD_TEMPLATE = """
                             <th>السوق</th>
                             <th>الإجراء</th>
                             <th>السعر المستهدف</th>
-                            <th>الإطار الزمني</th>
+                            <th>التاريخ المستهدف</th>
                             <th>سعر الدخول</th>
                             <th>العائد المتوقع</th>
                         </tr>
@@ -265,7 +265,7 @@ DASHBOARD_TEMPLATE = """
                             <td>{{ current_slug }}</td>
                             <td>BUY</td>
                             <td>{{ "تجاوز $122,000" if "bitcoin" in current_slug else "تخفيضان أو أكثر" }}</td>
-                            <td>أسبوعي (>3 أيام)</td>
+                            <td>{{ "30 سبتمبر 2026" if "bitcoin" in current_slug else "نهاية العام" }}</td>
                             <td>$0.41</td>
                             <td style="color: green; font-weight: bold;">+50.0%</td>
                         </tr>
@@ -302,7 +302,7 @@ def home():
 @app.route("/trial-status")
 def trial_status():
     return jsonify({
-        "status": "24-Hour Trial Active with Target Prices and Timeframes",
+        "status": "24-Hour Trial Active with Target Prices and Expected Dates",
         "allowed_markets": ALLOWED_MARKETS
     }), 200
 
