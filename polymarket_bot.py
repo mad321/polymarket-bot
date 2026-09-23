@@ -39,7 +39,7 @@ def fetch_live_market_data(slug):
 
 def get_claude_analysis(question):
     if not CLAUDE_API_KEY:
-        return "مفتاح Claude API غير مسجل."
+        return "مفتاح Claude API غير مسجل في متغيرات البيئة."
     try:
         url = "https://api.anthropic.com/v1/messages"
         headers = {
@@ -50,34 +50,34 @@ def get_claude_analysis(question):
         payload = {
             "model": "claude-3-haiku-20240307",
             "max_tokens": 150,
-            "messages": [{"role": "user", "content": f"بصفتك خبير تداول، حلل هذا السوق باختصار شديد واعطني توصية:\n{question}"}]
+            "messages": [{"role": "user", "content": f"بصفتك خبير تداول، قم بتحليل هذا السوق باختصار شديد واعطني توصية:\n{question}"}]
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
             return res.json()["content"][0]["text"]
         else:
-            return f"خطأ Claude ({res.status_code}): {res.text}"
+            return f"عذراً، تعذر جلب التحليل (رمز الخطأ: {res.status_code})"
     except Exception as e:
-        return f"فشل الاستعلام: {str(e)}"
+        return f"فشل الاتصال: {str(e)}"
 
 def get_gemini_analysis(question):
     if not GEMINI_API_KEY:
-        return "مفتاح Gemini API غير مسجل."
+        return "مفتاح Gemini API غير مسجل في متغيرات البيئة."
     try:
-        # استخدام الإصدار v1 مع نموذج gemini-1.5-flash المعتمد للـ API العام
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        # استخدام الإصدار المعتمد للـ Generative Language API
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         headers = {"content-type": "application/json"}
         payload = {
-            "contents": [{"parts": [{"text": f"بصفتك خبير تداول، حلل هذا السوق باختصار شديد واعطني توصية:\n{question}"}]}]
+            "contents": [{"parts": [{"text": f"بصفتك خبير تداول، قم بتحليل هذا السوق باختصار شديد واعطني توصية:\n{question}"}]}]
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
             data = res.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            return f"خطأ Gemini ({res.status_code}): {res.text}"
+            return f"عذراً، تعذر جلب التحليل (رمز الخطأ: {res.status_code})"
     except Exception as e:
-        return f"فشل الاستعلام: {str(e)}"
+        return f"فشل الاتصال: {str(e)}"
 
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
