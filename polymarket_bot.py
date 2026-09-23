@@ -15,7 +15,7 @@ wallet_address = os.environ.get("WALLET_ADDRESS")
 # تهيئة عميل CLOB (للتداول والأسعار اللحظية)
 client = ClobClient(host, key=private_key, chain_id=chain_id)
 
-# الروابط الأساسية لـ Gamma API
+# الروابط الأساسية لـ Gamma API فقط
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
 
 @app.route("/")
@@ -47,7 +47,7 @@ def search_market(market_slug):
         return jsonify({"error": str(e)}), 500
 
 # ---------------------------------------------------------
-# 2. فحص المحفظة وإدارة المخاطر عبر py-clob-client مباشرة
+# 2. فحص المحفظة والاتصال عبر py-clob-client مباشرة
 # ---------------------------------------------------------
 @app.route("/risk-check")
 def risk_check():
@@ -55,8 +55,6 @@ def risk_check():
     مسار يتحقق من اتصال العميل وجاهزية المحفظة لتداول Polymarket
     """
     try:
-        # استخدام العميل للتحقق من الاتصال وجلب بيانات الحساب المتاحة
-        # (يمكننا توسيعها لاحقاً لجلب الأرصدة عبر دوال العميل المتاحة)
         return jsonify({
             "status": "Connected successfully",
             "wallet_address": wallet_address,
