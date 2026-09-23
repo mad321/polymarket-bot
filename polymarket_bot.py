@@ -39,14 +39,57 @@ def fetch_live_market_data(slug):
         pass
     return {"question": slug, "active": True, "closed": False, "outcomes": ["Yes", "No"]}
 
-# تصميم الداشبورد بدون زر التنبيهات وحجم التداول
+def get_claude_analysis(question):
+    """استعلام حقيقي من نموذج Claude عبر الـ API"""
+    if not CLAUDE_API_KEY:
+        return "مفتاح Claude API غير مسجل في متغيرات البيئة."
+    try:
+        url = "https://api.anthropic.com/v1/messages"
+        headers = {
+            "x-api-key": CLAUDE_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+        payload = {
+            "model": "claude-3-haiku-20240307",
+            "max_tokens": 150,
+            "messages": [{"role": "user", "content": f"بصفتك خبير تداول ذكي، قم بتحليل هذا السوق باختصار شديد واعطني توصية (شراء نعم أو لا) مع النسبة المئوية للثقة:\n{question}"}]
+        }
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        if res.status_code == 200:
+            return res.json()["content"][0]["text"]
+        else:
+            return f"خطأ في الاتصال بـ Claude API: {res.status_code}"
+    except Exception as e:
+        return f"فشل الاستعلام: {str(e)}"
+
+def get_gemini_analysis(question):
+    """استعلام حقيقي من نموذج Gemini عبر الـ API"""
+    if not GEMINI_API_KEY:
+        return "مفتاح Gemini API غير مسجل في متغيرات البيئة."
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        headers = {"content-type": "application/json"}
+        payload = {
+            "contents": [{"parts": [{"text": f"بصفتك خبير تداول ذكي، قم بتحليل هذا السوق باختصار شديد واعطني توصية (شراء نعم أو لا) مع النسبة المئوية للثقة:\n{question}"}]}]
+        }
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            return f"خطأ في الاتصال بـ Gemini API: {res.status_code}"
+    except Exception as e:
+        return f"فشل الاستعلام: {str(e)}"
+
+# تصميم الداشبورد المحدث للاستعلامات الحية
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dual-AI Arena - Advanced Dashboard</title>
+    <title>Dual-AI Arena - Live Model Inference</title>
     <style>
         body { font-family: Tahoma, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; color: #333; }
         .container { max-width: 1100px; margin: auto; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
@@ -58,98 +101,56 @@ DASHBOARD_TEMPLATE = """
         .metric { margin: 10px 0; font-size: 14px; }
         .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
         .badge-success { background: #2ecc71; color: white; }
-        .badge-profit { background: #27ae60; color: white; }
         .control-panel { background: #e8f4f8; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
         select, button { padding: 8px 12px; border-radius: 5px; border: 1px solid #bdc3c7; font-family: Tahoma; }
         .btn-action { background: #2980b9; color: white; border: none; cursor: pointer; }
         .btn-action:hover { background: #1f618d; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 13px; }
-        th { background-color: #f2f2f2; }
-        .details-box { margin-top: 15px; padding: 10px; background: #fff; border: 1px dashed #3498db; display: none; border-radius: 5px; }
+        .ai-response { background: #fff; border: 1px solid #3498db; padding: 12px; border-radius: 6px; margin-top: 10px; font-size: 13px; white-space: pre-wrap; line-height: 1.6; }
         .live-market-info { background: #fff8e1; padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #ffe0b2; }
     </style>
-    <script>
-        function toggleDetails(modelId) {
-            var box = document.getElementById(modelId + '-details');
-            box.style.display = (box.style.display === 'none') ? 'block' : 'none';
-        }
-    </script>
 </head>
 <body>
     <div class="container">
         <h1>حلبة الذكاء الاصطناعي الثنائية (Dual-AI Arena)</h1>
-        <div class="subtitle">نظام التداول الحي وتحليل الأداء واستعلامات الاختبار الخلفي (Live API Backtesting)</div>
+        <div class="subtitle">التشغيل الفعلي لاستعلامات النماذج الحية (Claude Haiku & Gemini Flash API)</div>
 
-        <!-- لوحة معلومات السوق الحي (بدون حجم التداول) -->
+        <!-- معلومات السوق الحي -->
         <div class="live-market-info">
             <b>📊 معلومات السوق الحالي المستعلم عنه:</b><br>
             <span style="color: #d35400;">السؤال:</span> {{ market_info.question }}<br>
             <span style="color: #27ae60;">حالة السوق:</span> {{ "نشط ومتاح للتداول" if market_info.active else "مغلق" }}
         </div>
 
-        <!-- لوحة التحكم لاختيار الأسواق المعتمدة (بدون زر التنبيهات) -->
+        <!-- لوحة التحكم -->
         <div class="control-panel">
             <form method="GET" action="/" style="display: flex; width: 100%; justify-content: space-between; align-items: center; margin: 0;">
                 <div>
-                    <label for="market"><b>اختر السوق ضمن النطاق المتفق عليه:</b></label>
+                    <label for="market"><b>اختر السوق المستهدف:</b></label>
                     <select name="market" id="market">
                         {% for slug, name in allowed_markets.items() %}
                             <option value="{{ slug }}" {% if slug == current_slug %}selected{% endif %}>{{ name }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                <button type="submit" class="btn-action">تحديث واستعلام حي</button>
+                <button type="submit" class="btn-action">🔄 إرسال واستعلام حي من النماذج</button>
             </form>
         </div>
 
         <div class="grid">
-            <!-- بطاقة Claude -->
+            <!-- بطاقة تحليل Claude الحية -->
             <div class="card">
-                <h3>Claude Haiku (Live API)</h3>
-                <div class="metric"><b>نسبة النجاح المقدرة (Win Rate):</b> <span class="badge badge-success">78.2%</span></div>
-                <div class="metric"><b>تحليل النموذج للسوق الحي:</b> توصية مبنية على قراءة دفتر الطلبات</div>
-                
-                <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
-                
-                <h4>الاختبار الخلفي الحي (Live Backtest):</h4>
-                <div class="metric">📅 <b>أسبوع:</b> نسبة نجاح 76.0% | الأرباح: +$55.00</div>
-                <div class="metric">📅 <b>شهر:</b> نسبة نجاح 78.5% | الأرباح: +$225.00</div>
-                <div class="metric">📅 <b>سنة:</b> نسبة نجاح 77.0% | الأرباح: +$1,300.00</div>
-
-                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('claude')">عرض تفاصيل الصفقات الحية</button>
-                
-                <div id="claude-details" class="details-box">
-                    <strong>سجل صفقات Claude (استعلام حي):</strong>
-                    <table>
-                        <tr><th>السوق</th><th>الإجراء</th><th>الدخول</th><th>الخروج</th><th>النتيجة</th></tr>
-                        <tr><td>{{ current_slug }}</td><td>BUY</td><td>$0.53</td><td>$0.66</td><td style="color: green;">ربح (+24.5%)</td></tr>
-                    </table>
-                </div>
+                <h3>Claude Haiku (Live API Inference)</h3>
+                <div class="metric"><b>حالة النموذج:</b> <span class="badge badge-success">متصل وفعّال</span></div>
+                <div class="metric"><b>تحليل السوق الحي والتوصية:</b></div>
+                <div class="ai-response">{{ claude_resp }}</div>
             </div>
 
-            <!-- بطاقة Gemini -->
+            <!-- بطاقة تحليل Gemini الحية -->
             <div class="card">
-                <h3>Gemini Flash (Live API)</h3>
-                <div class="metric"><b>نسبة النجاح المقدرة (Win Rate):</b> <span class="badge badge-success">82.5%</span></div>
-                <div class="metric"><b>تحليل النموذج للسوق الحي:</b> توصية مبنية على حركة الأسعار</div>
-                
-                <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
-                
-                <h4>الاختبار الخلفي الحي (Live Backtest):</h4>
-                <div class="metric">📅 <b>أسبوع:</b> نسبة نجاح 81.0% | الأرباح: +$72.00</div>
-                <div class="metric">📅 <b>شهر:</b> نسبة نجاح 83.0% | الأرباح: +$280.00</div>
-                <div class="metric">📅 <b>سنة:</b> نسبة نجاح 82.0% | الأرباح: +$1,550.00</div>
-
-                <button class="btn-action" style="width: 100%; margin-top: 15px;" onclick="toggleDetails('gemini')">عرض تفاصيل الصفقات الحية</button>
-                
-                <div id="gemini-details" class="details-box">
-                    <strong>سجل صفقات Gemini (استعلام حي):</strong>
-                    <table>
-                        <tr><th>السوق</th><th>الإجراء</th><th>الدخول</th><th>الخروج</th><th>النتيجة</th></tr>
-                        <tr><td>{{ current_slug }}</td><td>BUY</td><td>$0.50</td><td>$0.69</td><td style="color: green;">ربح (+38%)</td></tr>
-                    </table>
-                </div>
+                <h3>Gemini Flash (Live API Inference)</h3>
+                <div class="metric"><b>حالة النموذج:</b> <span class="badge badge-success">متصل وفعّال</span></div>
+                <div class="metric"><b>تحليل السوق الحي والتوصية:</b></div>
+                <div class="ai-response">{{ gemini_resp }}</div>
             </div>
         </div>
     </div>
@@ -165,17 +166,23 @@ def home():
         
     market_info = fetch_live_market_data(selected_market)
     
+    # جلب الاستعلامات الحية من النماذج بناءً على سؤال السوق الحالي
+    claude_resp = get_claude_analysis(market_info["question"])
+    gemini_resp = get_gemini_analysis(market_info["question"])
+    
     return render_template_string(
         DASHBOARD_TEMPLATE, 
         allowed_markets=ALLOWED_MARKETS,
         current_slug=selected_market,
-        market_info=market_info
+        market_info=market_info,
+        claude_resp=claude_resp,
+        gemini_resp=gemini_resp
     )
 
 @app.route("/trial-status")
 def trial_status():
     return jsonify({
-        "status": "24-Hour Trial Active with Live API Backtesting",
+        "status": "24-Hour Trial Active with Live Model Inference",
         "allowed_markets": ALLOWED_MARKETS
     }), 200
 
