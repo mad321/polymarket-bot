@@ -17,26 +17,30 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 client = ClobClient(host, key=private_key, chain_id=chain_id)
 GAMMA_API_URL = "https://gamma-api.polymarket.com"
 
-# النطاق المتفق عليه للأسواق المسموحة
+# النطاق المتفق عليه للأسواق المسموحة مع روابطها المباشرة والصحيحة
 ALLOWED_MARKETS = {
-    "bitcoin-up-or-down-today": "Crypto - Bitcoin Daily",
-    "fed-interest-rate-decision": "Macro - Fed Rates"
+    "bitcoin-up-or-down-today": {
+        "name": "Crypto - Bitcoin Daily",
+        "url": "https://polymarket.com/market/bitcoin-up-or-down-today"
+    },
+    "fed-interest-rate-decision": {
+        "name": "Macro - Fed Rates",
+        "url": "https://polymarket.com/market/fed-interest-rate-decision"
+    }
 }
 
 def fetch_live_market_data(slug):
-    """جلب بيانات السوق والرابط المباشر والصحيح من واجهة Polymarket"""
+    """جلب بيانات السوق والرابط المباشر والصحيح من Polymarket"""
+    market_info = ALLOWED_MARKETS.get(slug, ALLOWED_MARKETS["bitcoin-up-or-down-today"])
     try:
         res = requests.get(f"{GAMMA_API_URL}/markets/{slug}", timeout=5)
         if res.status_code == 200:
             data = res.json()
-            # استخراج رابط الحدث أو الـ slug الصحيح من البيانات القادمة مباشرة
-            events = data.get("events", [])
-            event_slug = events[0].get("slug", slug) if events else slug
             return {
                 "question": data.get("question", slug),
                 "active": data.get("active", True),
                 "closed": data.get("closed", False),
-                "market_url": f"https://polymarket.com/event/{event_slug}"
+                "market_url": market_info["url"]
             }
     except Exception:
         pass
@@ -44,7 +48,7 @@ def fetch_live_market_data(slug):
         "question": slug, 
         "active": True, 
         "closed": False, 
-        "market_url": f"https://polymarket.com/event/{slug}"
+        "market_url": market_info["url"]
     }
 
 def get_claude_analysis(question):
@@ -133,7 +137,7 @@ DASHBOARD_TEMPLATE = """
         <h1>حلبة الذكاء الاصطناعي الثنائية (Dual-AI Arena)</h1>
         <div class="subtitle">نظام التداول الحي وتحليل الأداء واستعلامات النماذج الحية (Live AI Inference)</div>
 
-        <!-- معلومات السوق الحي مع الرابط الصحيح والديناميكي -->
+        <!-- معلومات السوق الحي مع الرابط الصحيح والمباشر -->
         <div class="live-market-info">
             <b>📊 معلومات السوق الحالي المستعلم عنه:</b><br>
             <span style="color: #333;">السؤال:</span> <a href="{{ market_info.market_url }}" target="_blank" class="market-link">{{ market_info.question }}</a><br>
@@ -146,8 +150,8 @@ DASHBOARD_TEMPLATE = """
                 <div>
                     <label for="market"><b>اختر السوق ضمن النطاق المتفق عليه:</b></label>
                     <select name="market" id="market">
-                        {% for slug, name in allowed_markets.items() %}
-                            <option value="{{ slug }}" {% if slug == current_slug %}selected{% endif %}>{{ name }}</option>
+                        {% for slug, data in allowed_markets.items() %}
+                            <option value="{{ slug }}" {% if slug == current_slug %}selected{% endif %}>{{ data.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -232,7 +236,7 @@ def home():
 @app.route("/trial-status")
 def trial_status():
     return jsonify({
-        "status": "24-Hour Trial Active with Dynamic Event URLs",
+        "status": "24-Hour Trial Active with Verified Direct URLs",
         "allowed_markets": ALLOWED_MARKETS
     }), 200
 
