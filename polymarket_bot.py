@@ -10,7 +10,6 @@ host = "https://clob.polymarket.com"
 chain_id = 137 # شبكة بوليجون
 
 private_key = os.environ.get("PRIVATE_KEY")
-# ستحتاج لإضافة عنوان محفظتك العامة كمتغير بيئة لتتمكن من جلب بيانات محفظتك
 wallet_address = os.environ.get("WALLET_ADDRESS")
 
 # تهيئة عميل CLOB (للتداول والأسعار اللحظية)
@@ -33,15 +32,12 @@ def search_market(market_slug):
     مثال: /search-market/saudi-arabia-to-win-gulf-cup
     """
     try:
-        # جلب تفاصيل السوق باستخدام الـ Slug
         response = requests.get(f"{GAMMA_API_URL}/markets/{market_slug}")
         
         if response.status_code != 200:
             return jsonify({"error": "Market not found"}), 404
             
         market_data = response.json()
-        
-        # استخراج الـ Token ID لخيارات السوق (مثل نعم / لا)
         tokens = market_data.get("tokens", [])
         
         return jsonify({
@@ -52,36 +48,37 @@ def search_market(market_slug):
         return jsonify({"error": str(e)}), 500
 
 # ---------------------------------------------------------
-# 2. استخدام Data API: لجلب قيمة المحفظة وإدارة المخاطر (10% كحد أقصى)
+# 2. استخدام Data API: لجلب قيمة المحفظة وإدارة المخاطر (10% كحد أقصى) - محسّن
 # ---------------------------------------------------------
 @app.route("/risk-check")
 def risk_check():
     """
-    مسار يتحقق من قيمة المحفظة ويحسب الحد الأقصى المسموح للدخول (10%)
+    مسار يتحقق من قيمة المحفظة ويحسب الحد الأقصى المسموح للدخول (10%) مع إظهار تفاصيل الرد للتشخيص
     """
     if not wallet_address:
         return jsonify({"error": "WALLET_ADDRESS not set in Environment Variables"}), 400
         
     try:
-        # استخدام Data API لجلب قيمة المحفظة (Portfolio Value)
-        # ملاحظة: بعض مسارات Data API تتطلب تمرير المستخدم كمعلمة
         response = requests.get(f"{DATA_API_URL}/portfolio?user={wallet_address}")
         
-        if response.status_code != 200:
-            return jsonify({"error": "Failed to fetch portfolio"}), 500
+        if response.status_code == 200:
+            portfolio_data = response.json()
+            total_value = float(portfolio_data.get("value", 0))
+            max_bet_size = total_value * 0.10
             
-        portfolio_data = response.json()
-        total_value = float(portfolio_data.get("value", 0))
-        
-        # تطبيق قاعدة الانضباط: الحد الأقصى للرهان هو 10% من البنكرول
-        max_bet_size = total_value * 0.10
-        
-        return jsonify({
-            "total_portfolio_value": f"${total_value:.2f}",
-            "max_allowed_bet_10_percent": f"${max_bet_size:.2f}",
-            "status": "Ready to trade within limits"
-        }), 200
-        
+            return jsonify({
+                "total_portfolio_value": f"${total_value:.2f}",
+                "max_allowed_bet_10_percent": f"${max_bet_size:.2f}",
+                "status": "Ready to trade within limits"
+            }), 200
+        else:
+            # إظهار السبب الفعلي وكود الاستجابة لتعرف تفاصيل الرد من المنصة
+            return jsonify({
+                "error": "API responded with non-200 status",
+                "status_code": response.status_code,
+                "response_text": response.text
+            }), 500
+            
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
