@@ -77,8 +77,9 @@ class PolymarketService:
     def search_markets(self, query: str, limit: int = 10) -> List[Dict]:
         """البحث عن الأسواق بناءً على الاستعلام"""
         try:
-            url = f"{self.gamma_url}/markets/search"
-            params = {"query": query, "limit": limit}
+            # محاولة البحث بنسختين من API
+            url = f"{self.gamma_url}/markets"
+            params = {"search_term": query, "limit": limit}
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
             markets = response.json()
