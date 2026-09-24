@@ -39,9 +39,9 @@ except Exception as e:
     sys.exit(1)
 
 try:
-    print("   جارٍ استيراد app...")
-    from app import app
-    print("   ✅ app")
+    print("   جارٍ استيراد polymarket_bot...")
+    from polymarket_bot import app
+    print("   ✅ polymarket_bot")
 except Exception as e:
     print(f"   ❌ خطأ: {e}")
     sys.exit(1)
@@ -184,7 +184,7 @@ print("-" * 70)
 
 try:
     # فحص عدم وجود المفاتيح مباشرة في الكود
-    files_to_check = ["app.py", "config.py", "polymarket_service.py", "ai_analysis.py"]
+    files_to_check = ["polymarket_bot.py", "config.py", "polymarket_service.py", "ai_analysis.py"]
 
     dangerous_patterns = ["CLAUDE_API_KEY=", "GEMINI_API_KEY=", "PRIVATE_KEY="]
 
@@ -235,7 +235,7 @@ print("""
 
 2. محلياً:
    • أضف مفاتيحك في .env
-   • شغّل: python app.py
+   • شغّل: python polymarket_bot.py
    • افتح: http://localhost:5000
 
 3. للاختبار الكامل:
