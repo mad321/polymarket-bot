@@ -105,15 +105,15 @@ class PolymarketService:
             logger.error(f"خطأ في جلب تفاصيل السوق {market_id}: {e}")
             return None
 
-    def get_market_by_slug(self, slug: str) -> Optional[Dict]:
-        """جلب بيانات السوق باستخدام الـ slug"""
+    def get_market_by_slug(self, market_id: str) -> Optional[Dict]:
+        """جلب بيانات السوق باستخدام الـ ID"""
         try:
-            url = f"{self.gamma_url}/markets/{slug}"
+            url = f"{self.gamma_url}/markets/{market_id}"
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:
-            logger.error(f"خطأ في جلب السوق {slug}: {e}")
+            logger.error(f"خطأ في جلب السوق {market_id}: {e}")
             return None
 
     def extract_live_market_data(self, market: Dict) -> Dict:
@@ -197,9 +197,9 @@ class PolymarketService:
             return 0
         return ((target_price - entry_price) / entry_price) * 100
 
-    def get_market_opportunity(self, market_slug: str, market_type: str) -> Optional[Dict]:
+    def get_market_opportunity(self, market_id: str, market_type: str) -> Optional[Dict]:
         """جلب فرصة تداول كاملة للسوق"""
-        market = self.get_market_by_slug(market_slug)
+        market = self.get_market_by_slug(market_id)
         if not market:
             return None
 

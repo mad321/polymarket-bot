@@ -394,12 +394,13 @@ def home():
 
         # اختيار السوق الأول (الأكثر صلة)
         selected_market_data = markets[0]
+        market_id = selected_market_data.get("id")
         market_slug = selected_market_data.get("slug")
 
-        logger.info(f"تم اختيار السوق: {market_slug}")
+        logger.info(f"تم اختيار السوق: {market_slug} (ID: {market_id})")
 
         # جلب البيانات الحية
-        market_opportunity = pm_service.get_market_opportunity(market_slug, market_config["type"])
+        market_opportunity = pm_service.get_market_opportunity(market_id, market_config["type"])
 
         if not market_opportunity:
             return render_template_string(
