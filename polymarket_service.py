@@ -29,8 +29,8 @@ class PolymarketService:
         3. بحث على Polymarket
         """
         if slug:
-            # الصيغة الأساسية لـ Polymarket
-            return f"https://polymarket.com/market/{slug}"
+            # الصيغة الصحيحة لـ Polymarket: /event/ وليس /market/
+            return f"https://polymarket.com/event/{slug}"
         elif market_id:
             # البديل عند عدم توفر slug
             return f"https://polymarket.com/market/{market_id}"
@@ -43,17 +43,11 @@ class PolymarketService:
         if market.get("url"):
             return market.get("url")
 
-        # الأولوية 2: استخدم slug لأنه الأكثر موثوقية
+        # الأولوية 2: استخدم slug مع /event/ (الصيغة الصحيحة)
         slug = market.get("slug", "")
         if slug:
-            # جرّب صيغ مختلفة من الروابط
-            url_variants = [
-                f"https://polymarket.com/market/{slug}",
-                f"https://polymarket.com/{slug}",
-                f"https://markets.polymarket.com/{slug}"
-            ]
-            # نستخدم الأول (الأكثر شيوعاً)
-            return url_variants[0]
+            # الصيغة الصحيحة: https://polymarket.com/event/{slug}
+            return f"https://polymarket.com/event/{slug}"
 
         # الأولوية 3: استخدم market_id مباشرة
         market_id = market.get("id", "")
