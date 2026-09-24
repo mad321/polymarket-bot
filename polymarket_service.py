@@ -77,17 +77,15 @@ class PolymarketService:
     def search_markets(self, query: str, limit: int = 10) -> List[Dict]:
         """البحث عن الأسواق بناءً على الاستعلام"""
         try:
-            # جلب أسواق من API وتصفيتها محلياً
+            # جلب أسواق من API بدون تصفية
             url = f"{self.gamma_url}/markets"
-            params = {"limit": limit * 3}  # جلب أكثر للتصفية
+            params = {"limit": limit}
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
             markets = response.json()
 
-            # تصفية الأسواق التي تحتوي على الكلمة المفتاحية
-            filtered = [m for m in markets if query.lower() in m.get("question", "").lower()][:limit]
-            logger.info(f"وجدت {len(filtered)} سوق للاستعلام: {query}")
-            return filtered
+            logger.info(f"وجدت {len(markets)} سوق")
+            return markets if markets else []
         except requests.RequestException as e:
             logger.error(f"خطأ في البحث عن الأسواق: {e}")
             return []
