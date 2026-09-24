@@ -20,6 +20,31 @@ class PolymarketService:
         self.gamma_url = GAMMA_API_URL
         self.session = requests.Session()
 
+    def build_market_url(self, market: Dict) -> str:
+        """بناء رابط صحيح للسوق من بيانات API"""
+        # الأولوية: استخدام الرابط الموجود مباشرة
+        if market.get("url"):
+            return market.get("url")
+
+        # محاولة بناء الرابط من الـ slug
+        slug = market.get("slug", "")
+        if slug:
+            return f"https://polymarket.com/market/{slug}"
+
+        # محاولة بناء الرابط من المعرّف
+        market_id = market.get("id", "")
+        if market_id:
+            return f"https://polymarket.com/market/{market_id}"
+
+        # البحث في events
+        events = market.get("events", [])
+        if events:
+            event_slug = events[0].get("slug", "")
+            if event_slug:
+                return f"https://polymarket.com/event/{event_slug}"
+
+        return "https://polymarket.com"
+
     def search_markets(self, query: str, limit: int = 10) -> List[Dict]:
         """البحث عن الأسواق بناءً على الاستعلام"""
         try:
@@ -81,8 +106,8 @@ class PolymarketService:
                 prices[outcome_label] = price
                 total_liquidity += outcome.get("liquidity", 0)
 
-            # بناء الرابط المباشر للسوق
-            direct_url = f"https://polymarket.com/market/{slug}" if slug else "https://polymarket.com"
+            # بناء الرابط المباشر للسوق باستخدام دالة محسّنة
+            direct_url = self.build_market_url(market)
 
             return {
                 "market_id": market_id,
