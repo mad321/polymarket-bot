@@ -20,29 +20,64 @@ class PolymarketService:
         self.gamma_url = GAMMA_API_URL
         self.session = requests.Session()
 
+    def get_reliable_market_url(self, market_id: str, slug: str = "") -> str:
+        """الحصول على رابط موثوق للسوق
+
+        استراتيجية الأولويات:
+        1. slug (الأكثر موثوقية)
+        2. market_id (بديل موثوق)
+        3. بحث على Polymarket
+        """
+        if slug:
+            # الصيغة الأساسية لـ Polymarket
+            return f"https://polymarket.com/market/{slug}"
+        elif market_id:
+            # البديل عند عدم توفر slug
+            return f"https://polymarket.com/market/{market_id}"
+        else:
+            return "https://polymarket.com"
+
     def build_market_url(self, market: Dict) -> str:
         """بناء رابط صحيح للسوق من بيانات API"""
-        # الأولوية: استخدام الرابط الموجود مباشرة
+        # الأولوية 1: استخدم الرابط المباشر من API إن وجد
         if market.get("url"):
             return market.get("url")
 
-        # محاولة بناء الرابط من الـ slug
+        # الأولوية 2: استخدم slug لأنه الأكثر موثوقية
         slug = market.get("slug", "")
         if slug:
-            return f"https://polymarket.com/market/{slug}"
+            # جرّب صيغ مختلفة من الروابط
+            url_variants = [
+                f"https://polymarket.com/market/{slug}",
+                f"https://polymarket.com/{slug}",
+                f"https://markets.polymarket.com/{slug}"
+            ]
+            # نستخدم الأول (الأكثر شيوعاً)
+            return url_variants[0]
 
-        # محاولة بناء الرابط من المعرّف
+        # الأولوية 3: استخدم market_id مباشرة
         market_id = market.get("id", "")
         if market_id:
             return f"https://polymarket.com/market/{market_id}"
 
-        # البحث في events
+        # الأولوية 4: ابحث عن رابط في الـ event
         events = market.get("events", [])
-        if events:
-            event_slug = events[0].get("slug", "")
+        if events and len(events) > 0:
+            event = events[0]
+            if event.get("url"):
+                return event.get("url")
+            event_slug = event.get("slug", "")
             if event_slug:
                 return f"https://polymarket.com/event/{event_slug}"
 
+        # الأولوية 5: الافتراضي - رابط البحث في Polymarket
+        question = market.get("question", "")
+        if question:
+            # رابط بحث يعمل بشكل أفضل
+            safe_query = question.replace(" ", "%20")[:50]
+            return f"https://polymarket.com/search?q={safe_query}"
+
+        # الخيار الأخير
         return "https://polymarket.com"
 
     def search_markets(self, query: str, limit: int = 10) -> List[Dict]:
@@ -106,8 +141,8 @@ class PolymarketService:
                 prices[outcome_label] = price
                 total_liquidity += outcome.get("liquidity", 0)
 
-            # بناء الرابط المباشر للسوق باستخدام دالة محسّنة
-            direct_url = self.build_market_url(market)
+            # بناء الرابط المباشر للسوق - استخدم الدالة الموثوقة
+            direct_url = self.get_reliable_market_url(market_id, slug)
 
             return {
                 "market_id": market_id,
