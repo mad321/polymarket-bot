@@ -1,1 +1,1 @@
-worker: python polymarket_bot.py
+web: python app.py
