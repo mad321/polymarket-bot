@@ -42,6 +42,6 @@ ALLOWED_MARKETS = {
 }
 
 # Model Configuration
-CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
-GEMINI_MODEL = "gemini-2.0-flash"
+CLAUDE_MODEL = "claude-3-5-haiku-20241022"
+GEMINI_MODEL = "gemini-1.5-flash"
 MAX_TOKENS = 500
