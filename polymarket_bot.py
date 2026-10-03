@@ -348,6 +348,37 @@ def home():
     )
 
 
+@app.route("/api/positions")
+def api_positions():
+    from flask import make_response
+    raw_positions = load_positions()
+    active = [p for p in raw_positions if not p.get("closed", False)]
+    enriched = []
+    for pos in active:
+        slug = pos.get("slug", "")
+        current_price = get_price_by_slug(slug) if slug else None
+        buy_price = pos.get("buy_price", 0)
+        pnl = None
+        if current_price is not None and buy_price:
+            pnl = round(((current_price - buy_price) / buy_price) * 100, 1)
+        enriched.append({
+            "id": pos.get("id"),
+            "name": pos.get("name"),
+            "slug": slug,
+            "url": build_polymarket_url(slug),
+            "shares": pos.get("shares", 0),
+            "buy_price": buy_price,
+            "stop_loss": pos.get("stop_loss", 0),
+            "take_profit": pos.get("take_profit", 100),
+            "current_price": current_price,
+            "pnl": pnl,
+            "notes": pos.get("notes", ""),
+        })
+    resp = make_response(jsonify({"positions": enriched, "updated_at": datetime.now().isoformat()}))
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+
 @app.route("/health")
 def health():
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
