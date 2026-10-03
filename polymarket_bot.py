@@ -1,5 +1,6 @@
 import os
 import logging
+import threading
 from flask import Flask, render_template_string, request, jsonify
 from datetime import datetime
 from polymarket_service import PolymarketService
@@ -474,8 +475,22 @@ def health_check():
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
 
+def start_monitor():
+    try:
+        from polymarket_monitor import main as monitor_main
+        logger.info("🔍 بدء مراقبة الصفقات المفتوحة...")
+        monitor_main()
+    except Exception as e:
+        logger.error(f"خطأ في المراقب: {e}")
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_ENV") == "development"
+
+    monitor_thread = threading.Thread(target=start_monitor, daemon=True)
+    monitor_thread.start()
+    logger.info("✅ مراقب الأسعار شغّال في الخلفية")
+
     logger.info(f"🚀 بدء التطبيق على المنفذ {port}")
     app.run(host="0.0.0.0", port=port, debug=debug)
