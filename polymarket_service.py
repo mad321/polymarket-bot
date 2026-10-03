@@ -127,7 +127,15 @@ class PolymarketService:
             time_remaining = (close_time - datetime.now(close_time.tzinfo)).total_seconds() if close_time else 0
 
             # جلب الأسعار الحية من الخيارات
-            outcomes = market.get("outcomes", [])
+            outcomes_raw = market.get("outcomes", [])
+            if isinstance(outcomes_raw, str):
+                import json
+                try:
+                    outcomes = json.loads(outcomes_raw)
+                except Exception:
+                    outcomes = []
+            else:
+                outcomes = outcomes_raw
             prices = {}
             total_liquidity = 0
 
