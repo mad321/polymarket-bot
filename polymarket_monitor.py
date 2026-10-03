@@ -2,6 +2,7 @@
 Polymarket Price Monitor - WhatsApp Alert Bot
 =============================================
 Monitors open Polymarket positions every 30 seconds.
+Positions are discovered from the wallet (WALLET_ADDRESS) — see positions.py.
 Sends WhatsApp alert when price drops below stop-loss threshold.
 
 Deploy on Render as a Background Worker.
@@ -13,6 +14,8 @@ import json
 import time
 import requests
 from datetime import datetime
+
+from positions import load_positions
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 
@@ -113,7 +116,7 @@ def format_alert(pos: dict, price: float, reason: str) -> str:
         f"{emoji} تنبيه بوليماركت\n"
         f"المباراة: {pos['name']}\n"
         f"السعر الحالي: {price}¢\n"
-        f"الحد: {pos['stop_loss']}¢\n"
+        f"الحد: {pos['stop_loss'] if reason == 'stop_loss' else pos['take_profit']}¢\n"
         f"الإجراء: {action}\n"
         f"الأسهم: {pos['shares']}\n"
         f"الوقت: {datetime.now().strftime('%H:%M:%S')}"
@@ -131,18 +134,20 @@ def main():
 
     while True:
         try:
-            positions = load_config()
-        except FileNotFoundError:
-            print("[ERROR] config.json not found!")
+            active, source, error = load_positions()
+        except Exception as e:
+            print(f"[ERROR] loading positions: {e}")
             time.sleep(60)
             continue
 
-        active = [p for p in positions if not p.get("closed", False)]
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Checking {len(active)} position(s)...")
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Checking {len(active)} position(s) from {source}..."
+              + (f" (wallet error: {error})" if error else ""))
 
         for pos in active:
             pid   = pos.get("id", pos.get("name", "unknown"))
-            price = get_price(pos)
+            price = pos.get("current_price")
+            if price is None:
+                price = get_price(pos)
 
             if price is None:
                 print(f"  ⚠️  {pos['name']}: could not fetch price")
@@ -167,7 +172,6 @@ def main():
             tp = pos.get("take_profit")
             if tp and price >= tp:
                 msg = format_alert(pos, price, "take_profit")
-                msg = msg.replace("stop_loss", "take_profit")
                 if send_whatsapp(msg):
                     last_alert_time[pid] = now
 

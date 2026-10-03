@@ -1,10 +1,10 @@
 import os
-import json
 import logging
 import threading
-import requests
 from flask import Flask, render_template_string, jsonify
 from datetime import datetime
+
+from positions import load_positions
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,8 +14,6 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-GAMMA_API = "https://gamma-api.polymarket.com"
-CONFIG_FILE = "config.json"
 
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
@@ -258,8 +256,10 @@ DASHBOARD_TEMPLATE = """
 
     <div class="section-title">
         <h2>الصفقات</h2>
-        <span>تحديث تلقائي كل 30 ثانية</span>
+        <span>{% if data_source == 'wallet' %}مكتشفة تلقائياً من المحفظة{% else %}من ملف config.json{% endif %} · تحديث تلقائي كل 30 ثانية</span>
     </div>
+
+    {% if error %}<div class="note" style="margin-bottom:14px;color:var(--amber)">⚠ تعذر الوصول للمحفظة، يتم العرض من config.json مؤقتاً</div>{% endif %}
 
     {% if positions %}
     <div class="grid">
@@ -319,6 +319,7 @@ DASHBOARD_TEMPLATE = """
     <div class="empty">
         <div class="icon">📭</div>
         <div>لا توجد صفقات مفتوحة حالياً</div>
+        {% if data_source == 'wallet' %}<div class="note">تأكد أن WALLET_ADDRESS هو عنوان محفظة Polymarket (من صفحة البروفايل) وليس عنوان المفتاح</div>{% endif %}
     </div>
     {% endif %}
 
@@ -331,114 +332,56 @@ DASHBOARD_TEMPLATE = """
 """
 
 
-def get_price_by_slug(slug: str):
-    try:
-        url = f"{GAMMA_API}/markets?slug={slug}"
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        if not data:
-            return None
-        prices_raw = data[0].get("outcomePrices", [])
-        if isinstance(prices_raw, str):
-            prices_raw = json.loads(prices_raw)
-        if prices_raw:
-            return round(float(prices_raw[0]) * 100, 1)
-    except Exception as e:
-        logger.error(f"خطأ في جلب سعر {slug}: {e}")
-    return None
+def enrich(pos):
+    """Adds dashboard-only fields: status and range-bar positions."""
+    cur, buy = pos["current_price"], pos["buy_price"]
+    stop, tp = pos["stop_loss"], pos["take_profit"]
 
+    status = "hold"
+    if cur is None:
+        status = "error"
+    elif cur >= tp:
+        status = "profit"
+    elif cur <= stop:
+        status = "loss"
+    elif pos["pnl"] is not None and pos["pnl"] > 0:
+        status = "profit"
+    elif pos["pnl"] is not None and pos["pnl"] < 0:
+        status = "loss"
 
-def build_polymarket_url(slug: str) -> str:
-    return f"https://polymarket.com/event/{slug}"
+    # Positions on the stop-loss → take-profit bar, clamped to 0–100%
+    thumb_pct = buy_pct = None
+    span = tp - stop
+    if cur is not None and span > 0:
+        clamp = lambda v: max(0, min(100, round(v, 1)))
+        thumb_pct = clamp((cur - stop) / span * 100)
+        buy_pct = clamp((buy - stop) / span * 100)
 
-
-def load_positions():
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return []
+    return {**pos, "status": status, "thumb_pct": thumb_pct, "buy_pct": buy_pct}
 
 
 @app.route("/")
 def home():
-    raw_positions = load_positions()
-    active = [p for p in raw_positions if not p.get("closed", False)]
+    raw, source, error = load_positions()
+    positions = [enrich(p) for p in raw]
 
-    enriched = []
-    pnl_list = []
-    total_cost = 0.0
-    total_value = 0.0
-
-    for pos in active:
-        slug = pos.get("slug", "")
-        current_price = get_price_by_slug(slug) if slug else None
-
-        buy_price = pos.get("buy_price", 0)
-        stop_loss = pos.get("stop_loss", 0)
-        take_profit = pos.get("take_profit", 100)
-
-        shares = pos.get("shares", 0)
-        cost = shares * buy_price / 100
-
-        pnl = None
-        pnl_usd = None
-        status = "hold"
-        if current_price is not None and buy_price:
-            pnl = ((current_price - buy_price) / buy_price) * 100
-            pnl_list.append(pnl)
-            value = shares * current_price / 100
-            pnl_usd = value - cost
-            total_cost += cost
-            total_value += value
-            if current_price >= take_profit:
-                status = "profit"
-            elif current_price <= stop_loss:
-                status = "loss"
-            elif pnl > 0:
-                status = "profit"
-            elif pnl < 0:
-                status = "loss"
-        elif current_price is None:
-            status = "error"
-
-        # Positions on the stop-loss → take-profit bar, clamped to 0–100%
-        thumb_pct = buy_pct = None
-        span = take_profit - stop_loss
-        if current_price is not None and span > 0:
-            clamp = lambda v: max(0, min(100, round(v, 1)))
-            thumb_pct = clamp((current_price - stop_loss) / span * 100)
-            buy_pct = clamp((buy_price - stop_loss) / span * 100)
-
-        enriched.append({
-            "name": pos.get("name", ""),
-            "slug": slug,
-            "url": build_polymarket_url(slug),
-            "shares": shares,
-            "buy_price": buy_price,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-            "current_price": current_price,
-            "pnl": round(pnl, 1) if pnl is not None else None,
-            "pnl_usd": round(pnl_usd, 2) if pnl_usd is not None else None,
-            "thumb_pct": thumb_pct,
-            "buy_pct": buy_pct,
-            "status": status,
-            "notes": pos.get("notes", ""),
-        })
-
+    priced = [p for p in positions if p["current_price"] is not None]
+    total_cost = sum(p["shares"] * p["buy_price"] / 100 for p in priced)
+    total_value = sum(p["shares"] * p["current_price"] / 100 for p in priced)
+    pnl_list = [p["pnl"] for p in priced if p["pnl"] is not None]
     total_pnl = round(sum(pnl_list) / len(pnl_list), 1) if pnl_list else 0
 
     return render_template_string(
         DASHBOARD_TEMPLATE,
-        positions=enriched,
+        positions=positions,
+        data_source=source,
+        error=error,
         total_pnl=total_pnl,
         total_cost=round(total_cost, 2),
         total_value=round(total_value, 2),
         total_pnl_usd=round(total_value - total_cost, 2),
-        winners=sum(1 for p in enriched if p["status"] == "profit"),
-        losers=sum(1 for p in enriched if p["status"] == "loss"),
+        winners=sum(1 for p in positions if p["status"] == "profit"),
+        losers=sum(1 for p in positions if p["status"] == "loss"),
         last_update=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     )
 
@@ -446,30 +389,13 @@ def home():
 @app.route("/api/positions")
 def api_positions():
     from flask import make_response
-    raw_positions = load_positions()
-    active = [p for p in raw_positions if not p.get("closed", False)]
-    enriched = []
-    for pos in active:
-        slug = pos.get("slug", "")
-        current_price = get_price_by_slug(slug) if slug else None
-        buy_price = pos.get("buy_price", 0)
-        pnl = None
-        if current_price is not None and buy_price:
-            pnl = round(((current_price - buy_price) / buy_price) * 100, 1)
-        enriched.append({
-            "id": pos.get("id"),
-            "name": pos.get("name"),
-            "slug": slug,
-            "url": build_polymarket_url(slug),
-            "shares": pos.get("shares", 0),
-            "buy_price": buy_price,
-            "stop_loss": pos.get("stop_loss", 0),
-            "take_profit": pos.get("take_profit", 100),
-            "current_price": current_price,
-            "pnl": pnl,
-            "notes": pos.get("notes", ""),
-        })
-    resp = make_response(jsonify({"positions": enriched, "updated_at": datetime.now().isoformat()}))
+    positions, source, error = load_positions()
+    resp = make_response(jsonify({
+        "positions": positions,
+        "source": source,
+        "error": error,
+        "updated_at": datetime.now().isoformat(),
+    }))
     resp.headers["Access-Control-Allow-Origin"] = "*"
     return resp
 
@@ -488,13 +414,25 @@ def start_monitor():
         logger.error(f"خطأ في المراقب: {e}")
 
 
+_monitor_started = False
+
+
+def ensure_monitor():
+    """Start the WhatsApp monitor once per process (gunicorn never runs __main__)."""
+    global _monitor_started
+    if _monitor_started or os.environ.get("ENABLE_MONITOR", "1") == "0":
+        return
+    _monitor_started = True
+    threading.Thread(target=start_monitor, daemon=True).start()
+    logger.info("✅ مراقب الأسعار شغّال في الخلفية")
+
+
+# Procfile runs a single gunicorn worker, so this starts exactly one monitor
+ensure_monitor()
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_ENV") == "development"
-
-    monitor_thread = threading.Thread(target=start_monitor, daemon=True)
-    monitor_thread.start()
-    logger.info("✅ مراقب الأسعار شغّال في الخلفية")
-
     logger.info(f"🚀 بدء التطبيق على المنفذ {port}")
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)
