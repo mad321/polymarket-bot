@@ -23,239 +23,308 @@ DASHBOARD_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="30">
     <title>مراقب صفقات بوليماركت</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg: #0b0f1a;
+            --surface: rgba(255,255,255,0.04);
+            --surface-2: rgba(255,255,255,0.07);
+            --border: rgba(255,255,255,0.08);
+            --text: #f1f3f9;
+            --muted: #8b93a7;
+            --accent: #e94560;
+            --green: #22d39b;
+            --red: #ff5a6e;
+            --blue: #4cc9f0;
+            --amber: #f5b942;
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'Segoe UI', Tahoma, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif;
+            background:
+                radial-gradient(900px 500px at 85% -10%, rgba(233,69,96,0.18), transparent 60%),
+                radial-gradient(800px 500px at 0% 10%, rgba(76,201,240,0.12), transparent 60%),
+                var(--bg);
+            background-attachment: fixed;
             min-height: 100vh;
-            padding: 20px;
-            color: #eee;
+            padding: 24px 16px 40px;
+            color: var(--text);
+            -webkit-font-smoothing: antialiased;
         }
-        .container { max-width: 1000px; margin: 0 auto; }
+        .num { font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+        .container { max-width: 1040px; margin: 0 auto; }
+
+        /* Header */
         .header {
-            text-align: center;
-            padding: 30px 0 20px;
-            border-bottom: 2px solid #e94560;
-            margin-bottom: 30px;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 16px; flex-wrap: wrap; margin-bottom: 28px;
         }
-        .header h1 { font-size: 2em; color: #e94560; margin-bottom: 8px; }
-        .header p { color: #aaa; font-size: 0.95em; }
-        .last-update { text-align: center; color: #666; font-size: 0.85em; margin-bottom: 25px; }
+        .brand { display: flex; align-items: center; gap: 14px; }
+        .logo {
+            width: 52px; height: 52px; border-radius: 14px;
+            display: grid; place-items: center; font-size: 26px;
+            background: linear-gradient(135deg, var(--accent), #ff8a5b);
+            box-shadow: 0 10px 30px -8px rgba(233,69,96,0.6);
+        }
+        .brand h1 { font-size: 1.6em; font-weight: 800; line-height: 1.2; }
+        .brand h1 span { color: var(--accent); }
+        .brand p { color: var(--muted); font-size: 0.92em; margin-top: 2px; }
+        .live {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 8px 14px; border-radius: 999px;
+            background: var(--surface); border: 1px solid var(--border);
+            color: var(--muted); font-size: 0.85em;
+        }
+        .dot {
+            width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+            box-shadow: 0 0 0 0 rgba(34,211,155,0.7); animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(34,211,155,0.6); }
+            70% { box-shadow: 0 0 0 8px rgba(34,211,155,0); }
+            100% { box-shadow: 0 0 0 0 rgba(34,211,155,0); }
+        }
 
-        .position-card {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 12px;
-            padding: 20px 25px;
-            margin-bottom: 18px;
-            transition: border-color 0.3s;
+        /* Summary */
+        .summary {
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 14px; margin-bottom: 28px;
         }
-        .position-card:hover { border-color: #e94560; }
+        .kpi {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 16px; padding: 18px 20px;
+            backdrop-filter: blur(8px);
+        }
+        .kpi .lbl { color: var(--muted); font-size: 0.82em; margin-bottom: 8px; }
+        .kpi .val { font-size: 1.7em; font-weight: 800; }
+        .kpi .sub { color: var(--muted); font-size: 0.78em; margin-top: 4px; }
 
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 18px;
-            flex-wrap: wrap;
-            gap: 10px;
+        .section-title {
+            display: flex; justify-content: space-between; align-items: baseline;
+            margin-bottom: 14px; color: var(--muted); font-size: 0.9em;
         }
-        .position-name { font-size: 1.2em; font-weight: bold; color: #fff; }
-        .position-link {
-            color: #e94560;
-            text-decoration: none;
-            font-size: 0.85em;
-            border: 1px solid #e94560;
-            padding: 4px 12px;
-            border-radius: 20px;
-            transition: all 0.2s;
-        }
-        .position-link:hover { background: #e94560; color: #fff; }
+        .section-title h2 { color: var(--text); font-size: 1.15em; font-weight: 700; }
 
-        .card-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-            gap: 12px;
+        /* Cards */
+        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .card {
+            position: relative; overflow: hidden;
+            background: linear-gradient(180deg, var(--surface-2), var(--surface));
+            border: 1px solid var(--border); border-radius: 18px;
+            padding: 20px 20px 18px;
+            transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
         }
+        .card::before {
+            content: ""; position: absolute; inset-inline-start: 0; top: 0; bottom: 0;
+            width: 4px; background: var(--tone, var(--blue));
+        }
+        .card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(255,255,255,0.16);
+            box-shadow: 0 18px 40px -20px rgba(0,0,0,0.8);
+        }
+        .card.profit { --tone: var(--green); }
+        .card.loss   { --tone: var(--red); }
+        .card.error  { --tone: var(--amber); }
+
+        .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 16px; }
+        .name { font-size: 1.15em; font-weight: 700; margin-bottom: 6px; }
+        .badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 10px; border-radius: 999px; font-size: 0.75em; font-weight: 700;
+            background: color-mix(in srgb, var(--tone, var(--blue)) 16%, transparent);
+            color: var(--tone, var(--blue));
+        }
+        .link {
+            flex-shrink: 0; color: var(--text); text-decoration: none; font-size: 0.8em;
+            padding: 6px 12px; border-radius: 10px;
+            background: var(--surface-2); border: 1px solid var(--border);
+            transition: background .2s, border-color .2s;
+        }
+        .link:hover { background: var(--accent); border-color: var(--accent); }
+
+        .price-row { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; }
+        .price-now .lbl, .pnl-box .lbl { color: var(--muted); font-size: 0.78em; margin-bottom: 2px; }
+        .price-now .big { font-size: 2em; font-weight: 800; color: var(--blue); line-height: 1; }
+        .pnl-box { text-align: left; }
+        .pnl-box .big { font-size: 1.35em; font-weight: 800; line-height: 1.1; }
+        .pnl-box .usd { font-size: 0.82em; color: var(--muted); }
+        .pos { color: var(--green); }
+        .neg { color: var(--red); }
+
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
         .stat {
-            background: rgba(0,0,0,0.3);
-            border-radius: 8px;
-            padding: 12px;
-            text-align: center;
+            background: rgba(0,0,0,0.25); border-radius: 10px; padding: 9px 6px; text-align: center;
         }
-        .stat-label { font-size: 0.75em; color: #888; margin-bottom: 6px; }
-        .stat-value { font-size: 1.3em; font-weight: bold; }
+        .stat .lbl { color: var(--muted); font-size: 0.7em; margin-bottom: 3px; }
+        .stat .v { font-weight: 700; font-size: 0.98em; }
+        .c-stop { color: var(--red); }
+        .c-tp { color: var(--green); }
 
-        .price-current { color: #00d4ff; }
-        .price-buy { color: #aaa; }
-        .price-stop { color: #ff4d4d; }
-        .price-tp { color: #00d084; }
-        .pnl-positive { color: #00d084; }
-        .pnl-negative { color: #ff4d4d; }
+        /* Range bar: stop-loss on the left → take-profit on the right */
+        .range { margin-top: 18px; direction: ltr; }
+        .track {
+            position: relative; height: 8px; border-radius: 999px;
+            background: linear-gradient(90deg, rgba(255,90,110,0.35), rgba(255,255,255,0.08) 50%, rgba(34,211,155,0.35));
+        }
+        .buy-tick {
+            position: absolute; top: -3px; width: 2px; height: 14px;
+            background: rgba(255,255,255,0.55); transform: translateX(-50%); border-radius: 2px;
+        }
+        .thumb {
+            position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--tone, var(--blue)); border: 3px solid var(--bg);
+            box-shadow: 0 0 0 2px var(--tone, var(--blue)), 0 0 14px var(--tone, var(--blue));
+        }
+        .range-labels {
+            display: flex; justify-content: space-between; margin-top: 8px;
+            font-size: 0.72em; color: var(--muted);
+        }
+        .note { margin-top: 12px; font-size: 0.8em; color: var(--muted); }
 
-        .progress-bar-wrap {
-            margin-top: 15px;
-            position: relative;
-            height: 8px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 4px;
-            overflow: visible;
+        .empty {
+            text-align: center; padding: 60px 20px; color: var(--muted);
+            background: var(--surface); border: 1px dashed var(--border); border-radius: 18px;
         }
-        .progress-bar-fill {
-            height: 100%;
-            border-radius: 4px;
-            transition: width 0.5s;
-        }
-        .progress-markers {
-            position: relative;
-            margin-top: 6px;
-            height: 16px;
-            font-size: 0.7em;
-            color: #666;
-        }
-        .marker-stop { position: absolute; color: #ff4d4d; }
-        .marker-buy { position: absolute; color: #aaa; transform: translateX(-50%); }
-        .marker-tp { position: absolute; color: #00d084; transform: translateX(-100%); }
+        .empty .icon { font-size: 40px; margin-bottom: 10px; }
 
-        .status-badge {
-            display: inline-block;
-            padding: 3px 10px;
-            border-radius: 12px;
-            font-size: 0.75em;
-            font-weight: bold;
-            margin-right: 8px;
+        .footer {
+            display: flex; justify-content: center; align-items: center; gap: 14px;
+            flex-wrap: wrap; margin-top: 30px; color: var(--muted); font-size: 0.85em;
         }
-        .status-profit { background: rgba(0,208,132,0.2); color: #00d084; }
-        .status-loss { background: rgba(255,77,77,0.2); color: #ff4d4d; }
-        .status-hold { background: rgba(0,212,255,0.15); color: #00d4ff; }
-        .status-error { background: rgba(255,255,255,0.1); color: #888; }
-
         .refresh-btn {
-            display: block;
-            margin: 25px auto;
-            padding: 12px 35px;
-            background: #e94560;
-            color: white;
-            border: none;
-            border-radius: 25px;
-            font-size: 1em;
-            cursor: pointer;
-            transition: opacity 0.2s;
+            font-family: inherit; font-weight: 700; font-size: 0.95em;
+            padding: 11px 26px; border: none; border-radius: 12px; cursor: pointer; color: #fff;
+            background: linear-gradient(135deg, var(--accent), #ff6b6b);
+            box-shadow: 0 10px 24px -10px rgba(233,69,96,0.8);
+            transition: transform .15s, opacity .15s;
         }
-        .refresh-btn:hover { opacity: 0.85; }
+        .refresh-btn:hover { transform: translateY(-1px); opacity: .92; }
 
-        .summary-bar {
-            display: flex;
-            justify-content: center;
-            gap: 30px;
-            margin-bottom: 25px;
-            flex-wrap: wrap;
+        @media (max-width: 820px) {
+            .summary { grid-template-columns: repeat(2, 1fr); }
+            .grid { grid-template-columns: 1fr; }
         }
-        .summary-item { text-align: center; }
-        .summary-item .val { font-size: 1.4em; font-weight: bold; }
-        .summary-item .lbl { font-size: 0.75em; color: #888; margin-top: 3px; }
-
-        @media (max-width: 600px) {
-            .card-stats { grid-template-columns: repeat(3, 1fr); }
+        @media (max-width: 420px) {
+            .stats { grid-template-columns: repeat(2, 1fr); }
+            .brand h1 { font-size: 1.3em; }
         }
     </style>
 </head>
 <body>
 <div class="container">
-    <div class="header">
-        <h1>📊 مراقب صفقات بوليماركت</h1>
-        <p>دوري أمم أوروبا - تحديث تلقائي كل 30 ثانية</p>
-    </div>
-
-    <div class="last-update">آخر تحديث: {{ last_update }}</div>
-
-    <div class="summary-bar">
-        <div class="summary-item">
-            <div class="val">{{ positions|length }}</div>
-            <div class="lbl">صفقة مفتوحة</div>
+    <header class="header">
+        <div class="brand">
+            <div class="logo">📊</div>
+            <div>
+                <h1>مراقب صفقات <span>بوليماركت</span></h1>
+                <p>دوري أمم أوروبا</p>
+            </div>
         </div>
-        <div class="summary-item">
-            <div class="val {% if total_pnl >= 0 %}pnl-positive{% else %}pnl-negative{% endif %}">
+        <div class="live"><span class="dot"></span> مباشر · آخر تحديث <span class="num">{{ last_update }}</span></div>
+    </header>
+
+    <section class="summary">
+        <div class="kpi">
+            <div class="lbl">الصفقات المفتوحة</div>
+            <div class="val num">{{ positions|length }}</div>
+            <div class="sub">{{ winners }} رابحة · {{ losers }} خاسرة</div>
+        </div>
+        <div class="kpi">
+            <div class="lbl">متوسط الأداء</div>
+            <div class="val num {% if total_pnl >= 0 %}pos{% else %}neg{% endif %}">
                 {% if total_pnl >= 0 %}+{% endif %}{{ "%.1f"|format(total_pnl) }}%
             </div>
-            <div class="lbl">متوسط الأداء</div>
+            <div class="sub">على الصفقات المسعّرة</div>
         </div>
+        <div class="kpi">
+            <div class="lbl">رأس المال المستثمر</div>
+            <div class="val num">${{ "%.2f"|format(total_cost) }}</div>
+            <div class="sub">للصفقات المسعّرة بسعر الشراء</div>
+        </div>
+        <div class="kpi">
+            <div class="lbl">الربح / الخسارة</div>
+            <div class="val num {% if total_pnl_usd >= 0 %}pos{% else %}neg{% endif %}">
+                {% if total_pnl_usd >= 0 %}+${{ "%.2f"|format(total_pnl_usd) }}{% else %}-${{ "%.2f"|format(-total_pnl_usd) }}{% endif %}
+            </div>
+            <div class="sub">القيمة الحالية <span class="num">${{ "%.2f"|format(total_value) }}</span></div>
+        </div>
+    </section>
+
+    <div class="section-title">
+        <h2>الصفقات</h2>
+        <span>تحديث تلقائي كل 30 ثانية</span>
     </div>
 
-    {% for pos in positions %}
-    <div class="position-card">
-        <div class="card-header">
-            <div>
-                {% if pos.status == 'profit' %}
-                    <span class="status-badge status-profit">📈 في الربح</span>
-                {% elif pos.status == 'loss' %}
-                    <span class="status-badge status-loss">📉 في الخسارة</span>
-                {% elif pos.status == 'error' %}
-                    <span class="status-badge status-error">⚠️ تعذر الجلب</span>
-                {% else %}
-                    <span class="status-badge status-hold">⏸ عادي</span>
-                {% endif %}
-                <span class="position-name">{{ pos.name }}</span>
-            </div>
-            <a href="{{ pos.url }}" target="_blank" class="position-link">🔗 الصفقة</a>
-        </div>
-
-        <div class="card-stats">
-            <div class="stat">
-                <div class="stat-label">السعر الحالي</div>
-                <div class="stat-value price-current">
-                    {% if pos.current_price %}{{ pos.current_price }}¢{% else %}—{% endif %}
+    {% if positions %}
+    <div class="grid">
+        {% for pos in positions %}
+        <article class="card {{ pos.status }}">
+            <div class="card-top">
+                <div>
+                    <div class="name">{{ pos.name }}</div>
+                    {% if pos.status == 'profit' %}<span class="badge">▲ في الربح</span>
+                    {% elif pos.status == 'loss' %}<span class="badge">▼ في الخسارة</span>
+                    {% elif pos.status == 'error' %}<span class="badge">⚠ تعذر جلب السعر</span>
+                    {% else %}<span class="badge">● عند سعر الشراء</span>{% endif %}
                 </div>
+                <a href="{{ pos.url }}" target="_blank" rel="noopener" class="link">فتح الصفقة ↗</a>
             </div>
-            <div class="stat">
-                <div class="stat-label">سعر الشراء</div>
-                <div class="stat-value price-buy">{{ pos.buy_price }}¢</div>
-            </div>
-            <div class="stat">
-                <div class="stat-label">وقف الخسارة</div>
-                <div class="stat-value price-stop">{{ pos.stop_loss }}¢</div>
-            </div>
-            <div class="stat">
-                <div class="stat-label">هدف الربح</div>
-                <div class="stat-value price-tp">{{ pos.take_profit }}¢</div>
-            </div>
-            <div class="stat">
-                <div class="stat-label">الأسهم</div>
-                <div class="stat-value">{{ pos.shares }}</div>
-            </div>
-            <div class="stat">
-                <div class="stat-label">الأداء</div>
-                <div class="stat-value {% if pos.pnl and pos.pnl >= 0 %}pnl-positive{% elif pos.pnl %}pnl-negative{% endif %}">
+
+            <div class="price-row">
+                <div class="price-now">
+                    <div class="lbl">السعر الحالي</div>
+                    <div class="big num">{% if pos.current_price is not none %}{{ pos.current_price }}¢{% else %}—{% endif %}</div>
+                </div>
+                <div class="pnl-box">
+                    <div class="lbl">الأداء</div>
                     {% if pos.pnl is not none %}
-                        {% if pos.pnl >= 0 %}+{% endif %}{{ "%.1f"|format(pos.pnl) }}%
-                    {% else %}—{% endif %}
+                    <div class="big num {% if pos.pnl >= 0 %}pos{% else %}neg{% endif %}">{% if pos.pnl >= 0 %}+{% endif %}{{ "%.1f"|format(pos.pnl) }}%</div>
+                    <div class="usd num">{% if pos.pnl_usd >= 0 %}+${{ "%.2f"|format(pos.pnl_usd) }}{% else %}-${{ "%.2f"|format(-pos.pnl_usd) }}{% endif %}</div>
+                    {% else %}<div class="big">—</div>{% endif %}
                 </div>
             </div>
-        </div>
 
-        {% if pos.current_price %}
-        <div class="progress-bar-wrap">
-            {% set range = pos.take_profit - pos.stop_loss %}
-            {% set fill_pct = ((pos.current_price - pos.stop_loss) / range * 100)|round|int %}
-            {% set fill_clamped = [0, [fill_pct, 100]|min]|max %}
-            <div class="progress-bar-fill" style="
-                width: {{ fill_clamped }}%;
-                background: {% if pos.pnl and pos.pnl >= 0 %}#00d084{% else %}#ff4d4d{% endif %};
-            "></div>
-        </div>
-        <div class="progress-markers">
-            <span class="marker-stop" style="left: 0%">{{ pos.stop_loss }}¢</span>
-            {% set buy_pct = ((pos.buy_price - pos.stop_loss) / range * 100)|round|int %}
-            <span class="marker-buy" style="left: {{ buy_pct }}%">{{ pos.buy_price }}¢</span>
-            <span class="marker-tp" style="left: 100%">{{ pos.take_profit }}¢</span>
-        </div>
-        {% endif %}
+            <div class="stats">
+                <div class="stat"><div class="lbl">الشراء</div><div class="v num">{{ pos.buy_price }}¢</div></div>
+                <div class="stat"><div class="lbl">وقف الخسارة</div><div class="v num c-stop">{{ pos.stop_loss }}¢</div></div>
+                <div class="stat"><div class="lbl">الهدف</div><div class="v num c-tp">{{ pos.take_profit }}¢</div></div>
+                <div class="stat"><div class="lbl">الأسهم</div><div class="v num">{{ pos.shares }}</div></div>
+            </div>
+
+            {% if pos.thumb_pct is not none %}
+            <div class="range">
+                <div class="track">
+                    <div class="buy-tick" style="left: {{ pos.buy_pct }}%"></div>
+                    <div class="thumb" style="left: {{ pos.thumb_pct }}%"></div>
+                </div>
+                <div class="range-labels">
+                    <span class="c-stop num">SL {{ pos.stop_loss }}¢</span>
+                    <span class="num">Buy {{ pos.buy_price }}¢</span>
+                    <span class="c-tp num">TP {{ pos.take_profit }}¢</span>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if pos.notes %}<div class="note">📝 {{ pos.notes }}</div>{% endif %}
+        </article>
+        {% endfor %}
     </div>
-    {% endfor %}
+    {% else %}
+    <div class="empty">
+        <div class="icon">📭</div>
+        <div>لا توجد صفقات مفتوحة حالياً</div>
+    </div>
+    {% endif %}
 
-    <button class="refresh-btn" onclick="location.reload()">🔄 تحديث الأسعار</button>
+    <footer class="footer">
+        <button class="refresh-btn" onclick="location.reload()">🔄 تحديث الأسعار</button>
+    </footer>
 </div>
 </body>
 </html>
@@ -299,6 +368,8 @@ def home():
 
     enriched = []
     pnl_list = []
+    total_cost = 0.0
+    total_value = 0.0
 
     for pos in active:
         slug = pos.get("slug", "")
@@ -308,32 +379,51 @@ def home():
         stop_loss = pos.get("stop_loss", 0)
         take_profit = pos.get("take_profit", 100)
 
+        shares = pos.get("shares", 0)
+        cost = shares * buy_price / 100
+
         pnl = None
+        pnl_usd = None
         status = "hold"
         if current_price is not None and buy_price:
             pnl = ((current_price - buy_price) / buy_price) * 100
             pnl_list.append(pnl)
+            value = shares * current_price / 100
+            pnl_usd = value - cost
+            total_cost += cost
+            total_value += value
             if current_price >= take_profit:
                 status = "profit"
             elif current_price <= stop_loss:
                 status = "loss"
-            elif pnl >= 0:
+            elif pnl > 0:
                 status = "profit"
-            else:
+            elif pnl < 0:
                 status = "loss"
         elif current_price is None:
             status = "error"
+
+        # Positions on the stop-loss → take-profit bar, clamped to 0–100%
+        thumb_pct = buy_pct = None
+        span = take_profit - stop_loss
+        if current_price is not None and span > 0:
+            clamp = lambda v: max(0, min(100, round(v, 1)))
+            thumb_pct = clamp((current_price - stop_loss) / span * 100)
+            buy_pct = clamp((buy_price - stop_loss) / span * 100)
 
         enriched.append({
             "name": pos.get("name", ""),
             "slug": slug,
             "url": build_polymarket_url(slug),
-            "shares": pos.get("shares", 0),
+            "shares": shares,
             "buy_price": buy_price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
             "current_price": current_price,
             "pnl": round(pnl, 1) if pnl is not None else None,
+            "pnl_usd": round(pnl_usd, 2) if pnl_usd is not None else None,
+            "thumb_pct": thumb_pct,
+            "buy_pct": buy_pct,
             "status": status,
             "notes": pos.get("notes", ""),
         })
@@ -344,6 +434,11 @@ def home():
         DASHBOARD_TEMPLATE,
         positions=enriched,
         total_pnl=total_pnl,
+        total_cost=round(total_cost, 2),
+        total_value=round(total_value, 2),
+        total_pnl_usd=round(total_value - total_cost, 2),
+        winners=sum(1 for p in enriched if p["status"] == "profit"),
+        losers=sum(1 for p in enriched if p["status"] == "loss"),
         last_update=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     )
 
