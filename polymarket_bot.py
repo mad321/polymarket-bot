@@ -403,7 +403,7 @@ def home():
         # جلب البيانات الحية
         market_opportunity = pm_service.get_market_opportunity(market_id, market_config["type"])
 
-        if not market_opportunity:
+        if not market_opportunity or not market_opportunity.get("question"):
             return render_template_string(
                 DASHBOARD_TEMPLATE,
                 allowed_markets=ALLOWED_MARKETS,
@@ -412,6 +412,15 @@ def home():
                 market_data=None,
                 analyses=None
             )
+
+        # تأكد من وجود القيم الأساسية بقيم افتراضية
+        market_opportunity.setdefault("total_liquidity", 0)
+        market_opportunity.setdefault("volume", 0)
+        market_opportunity.setdefault("time_remaining_seconds", 0)
+        market_opportunity.setdefault("best_buy_price", 0)
+        market_opportunity.setdefault("prices", {})
+        market_opportunity.setdefault("direct_url", "https://polymarket.com")
+        market_opportunity.setdefault("is_valid", False)
 
         # تحليل السوق باستخدام AI
         logger.info("جارٍ تحليل السوق...")

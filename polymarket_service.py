@@ -131,11 +131,39 @@ class PolymarketService:
             prices = {}
             total_liquidity = 0
 
-            for outcome in outcomes:
-                outcome_label = outcome.get("label", "")
-                price = float(outcome.get("price", 0))
+            # outcomePrices من API هي list of strings مش list of dicts
+            outcome_prices_raw = market.get("outcomePrices", [])
+            if isinstance(outcome_prices_raw, str):
+                import json
+                try:
+                    outcome_prices_raw = json.loads(outcome_prices_raw)
+                except Exception:
+                    outcome_prices_raw = []
+
+            for i, outcome in enumerate(outcomes):
+                if isinstance(outcome, dict):
+                    outcome_label = outcome.get("label", f"خيار {i+1}")
+                    price = float(outcome.get("price", 0))
+                    if price == 0 and i < len(outcome_prices_raw):
+                        try:
+                            price = float(outcome_prices_raw[i])
+                        except (ValueError, TypeError):
+                            price = 0
+                    total_liquidity += outcome.get("liquidity", 0) or 0
+                else:
+                    # outcome هو string (اسم الخيار)
+                    outcome_label = str(outcome)
+                    price = 0
+                    if i < len(outcome_prices_raw):
+                        try:
+                            price = float(outcome_prices_raw[i])
+                        except (ValueError, TypeError):
+                            price = 0
                 prices[outcome_label] = price
-                total_liquidity += outcome.get("liquidity", 0)
+
+            # السيولة من حقل منفصل إذا ما كانت في outcomes
+            if total_liquidity == 0:
+                total_liquidity = float(market.get("liquidity", 0) or 0)
 
             # بناء الرابط المباشر للسوق - استخدم الدالة الموثوقة
             direct_url = self.get_reliable_market_url(market_id, slug)
