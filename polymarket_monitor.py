@@ -1,181 +1,185 @@
 """
-Polymarket Price Monitor - WhatsApp Alert Bot
-=============================================
-Monitors open Polymarket positions every 30 seconds.
-Positions are discovered from the wallet (WALLET_ADDRESS) — see positions.py.
-Sends WhatsApp alert when price drops below stop-loss threshold.
+Polymarket Price Monitor
+========================
+Checks the open positions every 30 seconds (discovered from the wallet, see
+positions.py) and sends an alert when a price reaches its stop-loss or
+take-profit. It only alerts: it never places orders.
 
-Deploy on Render as a Background Worker.
-Set environment variables: WHATSAPP_TOKEN, PHONE_NUMBER_ID, RECIPIENT_PHONE
+Alerts go to every channel configured in alerts.py (Telegram and/or WhatsApp).
+Runs as a background thread of the web app (polymarket_bot.py); its state is
+served at /api/alerts/status.
+
+Optional settings:
+  ALERT_COOLDOWN  seconds before re-alerting the same position (default 3600)
+  STARTUP_ALERT   "0" to skip the "monitor started" message
+  ALERT_TZ        time zone for alert timestamps (default Asia/Riyadh)
 """
 
 import os
-import json
 import time
-import requests
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 
-from positions import load_positions
+import pytz
+import requests
+
+import alerts
+from positions import get_price_by_slug, load_positions
+
+logger = logging.getLogger(__name__)
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 
 POLYMARKET_API = "https://clob.polymarket.com"
-GAMMA_API      = "https://gamma-api.polymarket.com"
 
-WHATSAPP_TOKEN    = os.environ.get("WHATSAPP_TOKEN", "")
-PHONE_NUMBER_ID   = os.environ.get("PHONE_NUMBER_ID", "")
-RECIPIENT_PHONE   = os.environ.get("RECIPIENT_PHONE", "")   # e.g. "966501234567"
+CHECK_INTERVAL = 30          # seconds between price checks
+RETRY_AFTER_FAILURE = 300    # seconds before retrying an alert no channel accepted
+ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN", 3600))
 
-CONFIG_FILE   = "config.json"
-CHECK_INTERVAL = 30   # seconds between price checks
-ALERT_COOLDOWN = 300  # seconds before re-alerting same position (5 min)
+try:
+    ALERT_TZ = pytz.timezone(os.environ.get("ALERT_TZ", "Asia/Riyadh"))
+except pytz.UnknownTimeZoneError:
+    ALERT_TZ = pytz.utc
+
+# Read by /api/alerts/status.
+STATE = {
+    "running": False,
+    "started_at": None,
+    "last_check_at": None,
+    "positions": 0,
+    "past_level": 0,
+    "source": None,
+    "error": None,
+    "alert_cooldown_seconds": ALERT_COOLDOWN,
+}
+
+STARTUP_MESSAGE = (
+    "✅ مراقب بوليماركت بدأ العمل.\n"
+    "ستصلك هنا التنبيهات عند وصول أي صفقة لوقف الخسارة أو الهدف."
+)
 
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
 
-def load_config():
-    """Load positions config from JSON file."""
-    with open(CONFIG_FILE, "r") as f:
-        return json.load(f)
+def _utc_now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-def get_price_by_slug(slug: str) -> float | None:
-    """
-    Fetch current YES price for a market by its slug.
-    Returns price as integer (0-100 cents) or None on error.
-    """
-    try:
-        url = f"{GAMMA_API}/markets?slug={slug}"
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        if not data:
-            return None
-        market = data[0]
-        prices = market.get("outcomePrices", [])
-        # outcomePrices = ["0.72", "0.28"] → YES is index 0
-        if prices:
-            return round(float(prices[0]) * 100, 1)   # convert to cents
-    except Exception as e:
-        print(f"[ERROR] fetching {slug}: {e}")
-    return None
 
 def get_price_by_token_id(token_id: str) -> float | None:
-    """
-    Fetch price directly by CLOB token ID.
-    Returns price as integer (0-100 cents) or None on error.
-    """
+    """Current sell price (cents) for a CLOB token ID, or None on error."""
     try:
         url = f"{POLYMARKET_API}/price?token_id={token_id}&side=sell"
         r = requests.get(url, timeout=10)
         r.raise_for_status()
-        data = r.json()
-        price = data.get("price")
+        price = r.json().get("price")
         if price is not None:
             return round(float(price) * 100, 1)
     except Exception as e:
-        print(f"[ERROR] fetching token {token_id[:12]}...: {e}")
+        logger.error(f"Error fetching token {token_id[:12]}...: {e}")
     return None
 
+
 def get_price(position: dict) -> float | None:
-    """Auto-detect how to fetch price based on config fields."""
+    """Fallback when the wallet did not report a current price."""
     if "token_id" in position:
         return get_price_by_token_id(position["token_id"])
-    elif "slug" in position:
+    if position.get("slug"):
         return get_price_by_slug(position["slug"])
     return None
 
-def send_whatsapp(message: str):
-    """Send WhatsApp message via Meta Cloud API."""
-    if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID or not RECIPIENT_PHONE:
-        print(f"[WHATSAPP NOT CONFIGURED] Would send: {message}")
-        return False
-    url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": RECIPIENT_PHONE,
-        "type": "text",
-        "text": {"body": message}
-    }
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    try:
-        r = requests.post(url, json=payload, headers=headers, timeout=10)
-        r.raise_for_status()
-        print(f"[WHATSAPP SENT] {message[:60]}...")
-        return True
-    except Exception as e:
-        print(f"[WHATSAPP ERROR] {e}")
-        return False
+
+def level_hit(position: dict, price: float) -> str | None:
+    """"stop_loss" or "take_profit" when the price is at or past that level."""
+    stop, tp = position.get("stop_loss"), position.get("take_profit")
+    if stop and price <= stop:
+        return "stop_loss"
+    if tp and price >= tp:
+        return "take_profit"
+    return None
+
+
+def _signed_usd(value: float) -> str:
+    # The left-to-right mark keeps the sign before the number in RTL messages.
+    value = round(value, 2)
+    return f"‎{'-' if value < 0 else '+'}${abs(value):.2f}"
+
 
 def format_alert(pos: dict, price: float, reason: str) -> str:
-    """Format alert message in Arabic."""
-    emoji = "🔴" if reason == "stop_loss" else "🟢"
-    action = "بيع فوري - وقف الخسارة" if reason == "stop_loss" else "خذ الأرباح"
-    return (
-        f"{emoji} تنبيه بوليماركت\n"
-        f"المباراة: {pos['name']}\n"
-        f"السعر الحالي: {price}¢\n"
-        f"الحد: {pos['stop_loss'] if reason == 'stop_loss' else pos['take_profit']}¢\n"
-        f"الإجراء: {action}\n"
-        f"الأسهم: {pos['shares']}\n"
-        f"الوقت: {datetime.now().strftime('%H:%M:%S')}"
-    )
+    """Alert message in Arabic."""
+    hit_stop = reason == "stop_loss"
+    level = pos["stop_loss"] if hit_stop else pos["take_profit"]
+    lines = [
+        "🔴 تنبيه بوليماركت: وقف الخسارة" if hit_stop else "🟢 تنبيه بوليماركت: وصل للهدف",
+        f"الصفقة: {pos['name']}",
+        f"السعر الحالي: {price}¢ (الحد: {level}¢)",
+        f"الإجراء: {'بيع فوري - وقف الخسارة' if hit_stop else 'خذ الأرباح'}",
+        f"الأسهم: {pos['shares']}",
+    ]
+    if pos.get("pnl_usd") is not None:
+        lines.append(f"الربح / الخسارة: {_signed_usd(pos['pnl_usd'])}")
+    if pos.get("url"):
+        lines.append(pos["url"])
+    lines.append(f"الوقت: {datetime.now(ALERT_TZ):%H:%M}")
+    return "\n".join(lines)
 
 # ─── MAIN LOOP ────────────────────────────────────────────────────────────────
 
-def main():
-    print("=" * 50)
-    print("Polymarket Monitor Bot - Starting")
-    print(f"Check interval: {CHECK_INTERVAL}s | Alert cooldown: {ALERT_COOLDOWN}s")
-    print("=" * 50)
+def check_once(next_alert_at: dict[str, float]) -> None:
+    """One pass over the positions; sends the alerts that are due."""
+    positions, source, error = load_positions()
+    now = time.time()
+    past_level = 0
 
-    last_alert_time: dict[str, float] = {}   # position_id → timestamp
-
-    while True:
-        try:
-            active, source, error = load_positions()
-        except Exception as e:
-            print(f"[ERROR] loading positions: {e}")
-            time.sleep(60)
+    for pos in positions:
+        price = pos.get("current_price")
+        if price is None:
+            price = get_price(pos)
+        if price is None:
+            logger.warning(f"{pos['name']}: could not fetch price")
             continue
 
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Checking {len(active)} position(s) from {source}..."
-              + (f" (wallet error: {error})" if error else ""))
+        reason = level_hit(pos, price)
+        if not reason:
+            continue
+        past_level += 1
 
-        for pos in active:
-            pid   = pos.get("id", pos.get("name", "unknown"))
-            price = pos.get("current_price")
-            if price is None:
-                price = get_price(pos)
+        pid = pos.get("id") or pos.get("name", "unknown")
+        if now < next_alert_at.get(pid, 0):
+            continue
+        sent = alerts.send_alert(format_alert(pos, price, reason))
+        next_alert_at[pid] = now + (ALERT_COOLDOWN if sent else RETRY_AFTER_FAILURE)
+        logger.info(f"{reason} alert for {pos['name']} at {price}¢: "
+                    f"{'sent' if sent else 'not sent'}")
 
-            if price is None:
-                print(f"  ⚠️  {pos['name']}: could not fetch price")
-                continue
+    STATE.update(last_check_at=_utc_now(), positions=len(positions),
+                 past_level=past_level, source=source, error=error)
+    logger.info(f"Checked {len(positions)} position(s) from {source}, "
+                f"{past_level} at or past a level"
+                + (f" (wallet error: {error})" if error else ""))
 
-            print(f"  {pos['name']}: {price}¢  (stop: {pos.get('stop_loss','—')}¢  tp: {pos.get('take_profit','—')}¢)")
 
-            # Cooldown check
-            now = time.time()
-            last = last_alert_time.get(pid, 0)
-            if now - last < ALERT_COOLDOWN:
-                continue
+def main():
+    channels = alerts.configured_channels()
+    logger.info(f"Polymarket monitor starting: every {CHECK_INTERVAL}s, "
+                f"cooldown {ALERT_COOLDOWN}s, channels: {', '.join(channels) or 'none'}")
+    STATE.update(running=True, started_at=_utc_now())
 
-            # Stop-loss alert
-            stop = pos.get("stop_loss")
-            if stop and price <= stop:
-                msg = format_alert(pos, price, "stop_loss")
-                if send_whatsapp(msg):
-                    last_alert_time[pid] = now
+    if os.environ.get("STARTUP_ALERT", "1") != "0":
+        alerts.send_alert(STARTUP_MESSAGE)
 
-            # Take-profit alert
-            tp = pos.get("take_profit")
-            if tp and price >= tp:
-                msg = format_alert(pos, price, "take_profit")
-                if send_whatsapp(msg):
-                    last_alert_time[pid] = now
+    next_alert_at: dict[str, float] = {}   # position id → earliest next alert
+    try:
+        while True:
+            try:
+                check_once(next_alert_at)
+            except Exception as e:
+                # Keep the thread alive: one bad pass must not end the monitoring.
+                STATE["error"] = str(e)
+                logger.exception("Monitor check failed")
+            time.sleep(CHECK_INTERVAL)
+    finally:
+        STATE["running"] = False
 
-        time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()
