@@ -405,6 +405,14 @@ def health():
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
 
+@app.route("/api/alerts/status")
+def alerts_status():
+    """Is the monitor running, and did the last alerts go out? No secrets here."""
+    import alerts
+    from polymarket_monitor import STATE
+    return jsonify({"monitor": STATE, "channels": alerts.status()})
+
+
 def start_monitor():
     try:
         from polymarket_monitor import main as monitor_main
@@ -418,7 +426,7 @@ _monitor_started = False
 
 
 def ensure_monitor():
-    """Start the WhatsApp monitor once per process (gunicorn never runs __main__)."""
+    """Start the alert monitor once per process (gunicorn never runs __main__)."""
     global _monitor_started
     if _monitor_started or os.environ.get("ENABLE_MONITOR", "1") == "0":
         return
