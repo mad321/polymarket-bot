@@ -3,6 +3,6 @@ requests==2.31.0
 python-dotenv==1.0.0
 anthropic>=0.40.0
 google-generativeai>=0.8.0
-py-clob-client==0.34.6
+polymarket-client==0.12.0
 pytz==2023.3
 gunicorn==21.2.0

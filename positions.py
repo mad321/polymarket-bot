@@ -1,11 +1,12 @@
 """
 Position discovery
 ==================
-Pulls the wallet's open positions straight from Polymarket's public Data API,
-so new trades show up without editing config.json.
+Pulls the wallets' open positions straight from Polymarket's public Data API
+(v2), so new trades show up without editing config.json.
 
 - WALLET_ADDRESS must be the Polymarket *proxy* wallet (the deposit address
-  shown on your Polymarket profile), not the signer/EOA key address.
+  shown on your Polymarket profile), not the signer/EOA key address. Several
+  wallets can be comma-separated; the bot's TRADING_WALLET is always added.
 - config.json is now optional overrides, matched by market slug:
   name (Arabic label), stop_loss, take_profit, notes, closed (hide).
 - Positions without overrides get stop-loss / take-profit relative to the
@@ -62,53 +63,62 @@ def _default_levels(buy_price):
     return stop, tp
 
 
-def fetch_wallet_positions(address: str):
-    """Raw open positions for a proxy wallet. Raises on network/API errors."""
-    r = requests.get(
-        f"{DATA_API}/positions",
-        params={"user": address, "sizeThreshold": MIN_SHARES, "limit": 500},
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json()
+def fetch_wallet_positions(address: str, max_pages: int = 10):
+    """
+    Raw open positions for a wallet from Data API v2 (v1 is retired on
+    October 24, 2026). Follows the cursor pagination. Raises on errors.
+    """
+    rows, cursor = [], None
+    for _ in range(max_pages):
+        params = {"user": address, "status": "OPEN", "limit": 100}
+        if cursor:
+            params["cursor"] = cursor
+        r = requests.get(f"{DATA_API}/v2/positions", params=params, timeout=15)
+        r.raise_for_status()
+        body = r.json()
+        rows.extend(body.get("data") or [])
+        cursor = (body.get("pagination") or {}).get("next_cursor")
+        if not cursor:
+            break
+    return rows
 
 
-def _from_wallet(raw, overrides):
+def _from_wallet(raw, overrides, wallet=""):
     out = []
     for p in raw:
         # Resolved markets (redeemable) and dust are not "open" positions
-        if p.get("redeemable") or float(p.get("size") or 0) < MIN_SHARES:
+        if p.get("redeemable") or float(p.get("current_size") or 0) < MIN_SHARES:
             continue
         slug = p.get("slug", "")
         ov = overrides.get(slug, {})
         if ov.get("closed"):
             continue
 
-        buy = round(float(p.get("avgPrice") or 0) * 100, 1)
-        cur = p.get("curPrice")
+        buy = round(float(p.get("avg_price") or 0) * 100, 1)
+        cur = p.get("current_price")
         cur = round(float(cur) * 100, 1) if cur is not None else None
         stop, tp = _default_levels(buy)
         title = p.get("title", slug)
         outcome = p.get("outcome", "")
 
         out.append({
-            "id": p.get("asset") or slug,
+            "id": p.get("token_id") or slug,
+            "wallet": wallet,
             "name": ov.get("name") or (f"{title} — {outcome}" if outcome else title),
             "title": title,
             "outcome": outcome,
             "slug": slug,
-            "url": f"https://polymarket.com/event/{p.get('eventSlug') or slug}",
-            "shares": round(float(p.get("size") or 0), 2),
+            "url": f"https://polymarket.com/event/{p.get('event_slug') or slug}",
+            "shares": round(float(p.get("current_size") or 0), 2),
             "buy_price": buy,
             "current_price": cur,
             "stop_loss": ov.get("stop_loss", stop),
             "take_profit": ov.get("take_profit", tp),
-            "pnl": round(float(p["percentPnl"]), 1) if p.get("percentPnl") is not None else None,
-            "pnl_usd": round(float(p["cashPnl"]), 2) if p.get("cashPnl") is not None else None,
-            "end_date": p.get("endDate"),
+            "pnl": round(float(p["percent_pnl"]), 1) if p.get("percent_pnl") is not None else None,
+            "pnl_usd": round(float(p["unrealized_pnl"]), 2) if p.get("unrealized_pnl") is not None else None,
+            "end_date": p.get("end_date"),
             "notes": ov.get("notes", ""),
         })
-    out.sort(key=lambda x: x.get("end_date") or "")
     return out
 
 
@@ -144,20 +154,42 @@ def _from_config(config):
     return out
 
 
+def watched_wallets():
+    """
+    Wallets to watch: WALLET_ADDRESS (comma-separated for several) plus the
+    bot's trading wallet (TRADING_WALLET), lowercased and without duplicates.
+    """
+    raw = f"{os.environ.get('WALLET_ADDRESS') or ''},{os.environ.get('TRADING_WALLET') or ''}"
+    wallets = []
+    for address in raw.split(","):
+        address = address.strip().lower()
+        if address and address not in wallets:
+            wallets.append(address)
+    return wallets
+
+
 def load_positions():
     """
     Returns (positions, source, error).
-    source is "wallet" or "config"; error is a message when the wallet
-    lookup failed and we fell back to config.json.
+    source is "wallet" or "config"; error is a message when a wallet lookup
+    failed. If every wallet failed, falls back to config.json.
     """
     config = load_config()
-    address = (os.environ.get("WALLET_ADDRESS") or "").strip()
-    if address:
+    wallets = watched_wallets()
+    if not wallets:
+        return _from_config(config), "config", None
+
+    overrides = {c["slug"]: c for c in config if c.get("slug")}
+    positions, errors = [], []
+    for wallet in wallets:
         try:
-            raw = fetch_wallet_positions(address)
-            overrides = {c["slug"]: c for c in config if c.get("slug")}
-            return _from_wallet(raw, overrides), "wallet", None
+            positions += _from_wallet(fetch_wallet_positions(wallet), overrides, wallet)
         except Exception as e:
-            logger.error(f"تعذر جلب صفقات المحفظة: {e}")
-            return _from_config(config), "config", str(e)
-    return _from_config(config), "config", None
+            logger.error(f"تعذر جلب صفقات المحفظة {wallet[:8]}…: {e}")
+            errors.append(str(e))
+
+    error = "; ".join(errors) or None
+    if len(errors) == len(wallets):
+        return _from_config(config), "config", error
+    positions.sort(key=lambda x: x.get("end_date") or "")
+    return positions, "wallet", error
