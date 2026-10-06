@@ -9,6 +9,7 @@ Pulls the wallets' open positions straight from Polymarket's public Data API
   wallets can be comma-separated; the bot's TRADING_WALLET is always added.
 - config.json is now optional overrides, matched by market slug:
   name (Arabic label), stop_loss, take_profit, notes, closed (hide).
+  They skip the bot's TRADING_WALLET unless an entry names it in "wallet".
 - Positions without overrides get stop-loss / take-profit relative to the
   buy price: STOP_LOSS_PCT (default 30% below) and TAKE_PROFIT_PCT
   (default 50% above, capped at 99¢).
@@ -168,6 +169,25 @@ def watched_wallets():
     return wallets
 
 
+def overrides_for(config, wallet):
+    """
+    config.json overrides for one wallet, by slug. An entry with a "wallet"
+    field applies to that wallet only. An entry without one applies to every
+    wallet except the bot's TRADING_WALLET: those entries were written for
+    earlier trades, and a new bot trade in the same market must get levels
+    from its own buy price, not someone else's stop.
+    """
+    trading = (os.environ.get("TRADING_WALLET") or "").strip().lower()
+    out = {}
+    for c in config:
+        if not c.get("slug"):
+            continue
+        scope = (c.get("wallet") or "").strip().lower()
+        if scope == wallet or (not scope and wallet != trading):
+            out[c["slug"]] = c
+    return out
+
+
 def load_positions():
     """
     Returns (positions, source, error).
@@ -179,11 +199,10 @@ def load_positions():
     if not wallets:
         return _from_config(config), "config", None
 
-    overrides = {c["slug"]: c for c in config if c.get("slug")}
     positions, errors = [], []
     for wallet in wallets:
         try:
-            positions += _from_wallet(fetch_wallet_positions(wallet), overrides, wallet)
+            positions += _from_wallet(fetch_wallet_positions(wallet), overrides_for(config, wallet), wallet)
         except Exception as e:
             logger.error(f"تعذر جلب صفقات المحفظة {wallet[:8]}…: {e}")
             errors.append(str(e))

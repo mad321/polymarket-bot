@@ -147,7 +147,7 @@ class MonitorTests(unittest.TestCase):
     def test_failed_alert_is_retried_sooner(self):
         next_alert_at = {}
         self.run_check(next_alert_at, 1000, sent=False)
-        self.assertEqual(next_alert_at["tok-1"], 1000 + monitor.RETRY_AFTER_FAILURE)
+        self.assertEqual(next_alert_at[":tok-1"], 1000 + monitor.RETRY_AFTER_FAILURE)
 
     def test_position_inside_its_levels_is_quiet(self):
         inside = dict(POSITION, current_price=50.0)
