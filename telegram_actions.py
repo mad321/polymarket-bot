@@ -25,8 +25,25 @@ logger = logging.getLogger(__name__)
 CONFIRM_TTL = 120   # seconds a confirmation button stays valid
 POLL_TIMEOUT = 25   # Telegram long-poll wait, in seconds
 
-# Read by /api/alerts/status.
-STATE = {"running": False, "last_update_at": None, "last_error": None}
+# Read by /api/alerts/status. Chat ids appear only as their last 3 digits.
+STATE = {
+    "running": False,
+    "last_update_at": None,
+    "last_error": None,
+    "last_reply_error": None,
+    "ignored_other_chat": 0,
+    "last_ignored_chat_ends_with": None,
+    "chat_id_setting": None,
+}
+
+# Direction marks and other invisible characters that RTL keyboards and
+# copy-paste slip into "/start" or a copied chat id.
+_INVISIBLE = dict.fromkeys(map(ord, "​‌‍‎‏‪‫‬‭"
+                                    "‮⁦⁧⁨⁩﻿ "))
+
+
+def _clean(text):
+    return str(text).translate(_INVISIBLE).strip()
 
 HELP = (
     "أوامر البوت:\n"
@@ -36,7 +53,7 @@ HELP = (
 
 
 def _chat_id():
-    return (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+    return _clean(os.environ.get("TELEGRAM_CHAT_ID") or "")
 
 
 def sell_button(asset_id):
@@ -58,6 +75,7 @@ def _reply(text, markup=None):
         payload["reply_markup"] = markup
     _, error = alerts.telegram_api("sendMessage", payload)
     if error:
+        STATE["last_reply_error"] = error
         logger.error(f"[TELEGRAM REPLY ERROR] {error}")
 
 
@@ -203,7 +221,13 @@ def result_text(r):
 
 def _authorized(update):
     message = update.get("message") or (update.get("callback_query") or {}).get("message") or {}
-    return str((message.get("chat") or {}).get("id", "")) == _chat_id()
+    chat = _clean((message.get("chat") or {}).get("id", ""))
+    if chat and chat == _chat_id():
+        return True
+    STATE["ignored_other_chat"] += 1
+    STATE["last_ignored_chat_ends_with"] = chat[-3:]
+    logger.info(f"Ignored a Telegram update from chat …{chat[-3:]}")
+    return False
 
 
 def handle_update(update):
@@ -213,9 +237,11 @@ def handle_update(update):
         if "callback_query" in update:
             handle_callback(update["callback_query"])
             return
-        text = (update.get("message") or {}).get("text") or ""
+        text = _clean((update.get("message") or {}).get("text") or "")
         if text.startswith("/"):
             handle_command(text)
+        elif text:
+            _reply(HELP)
     except Exception:
         logger.exception("Telegram update failed")
         _reply("⚠️ حدث خطأ غير متوقع، حاول مرة أخرى بعد قليل.")
@@ -223,6 +249,8 @@ def handle_update(update):
 
 def poll_forever():
     STATE["running"] = True
+    raw = (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+    STATE["chat_id_setting"] = {"ends_with": _chat_id()[-3:], "has_hidden_characters": _chat_id() != raw}
     alerts.telegram_api("setMyCommands", {"commands": [
         {"command": "positions", "description": "صفقات محفظة البوت وأزرار البيع"},
     ]})
