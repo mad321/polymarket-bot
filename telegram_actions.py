@@ -14,6 +14,7 @@ Only one process may poll a bot token: run the web app with one worker.
 import os
 import time
 import logging
+import threading
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -188,6 +189,7 @@ def _confirm(callback, message, rest):
         return
     _answer(callback, "جارٍ البيع…")
     _close(message, "⏳ جارٍ التنفيذ…")
+    placed_at = time.time()
     try:
         result = trading.sell(key, shares, price)
     except trading.TradingError as e:
@@ -200,6 +202,29 @@ def _confirm(callback, message, rest):
                "قبل أن تحاول مرة أخرى.")
         return
     _reply(result_text(result))
+    if result.get("status") == "delayed" and result.get("order_id"):
+        # Follow up off the polling thread, so other taps are not held up.
+        threading.Thread(target=_report_delayed, args=(result, placed_at), daemon=True).start()
+
+
+def _report_delayed(result, placed_at):
+    try:
+        outcome = trading.await_delayed_fill(result["order_id"], result["asset_id"], placed_at)
+    except Exception:
+        logger.exception("Following a delayed sale failed")
+        outcome = None
+    _reply(delayed_outcome_text(result, outcome))
+
+
+def delayed_outcome_text(r, outcome):
+    if outcome is None:
+        return (f"⚠️ لم أعرف نتيجة بيع {r['name']} بعد دقيقة. "
+                "تحقق من الصفقة بـ /positions أو في بوليماركت قبل أن تحاول مرة أخرى.")
+    if outcome["status"] == "unfilled":
+        return (f"❌ لم يُبع شيء من {r['name']}: السعر نزل تحت الحد الأدنى {_cents(r['min_price'])} "
+                "أثناء انتظار التنفيذ. اضغط \"بيع الآن\" مرة أخرى لسعر جديد.")
+    return (f"✅ تم البيع: {r['name']}\n"
+            f"بِيع {Decimal(outcome['sold']).normalize():f} سهم مقابل {_usd(outcome['received'])} تقريباً")
 
 
 def result_text(r):
@@ -209,7 +234,7 @@ def result_text(r):
     if not r["ok"]:
         return f"❌ لم يتم البيع: {r.get('message') or r['status']}"
     if r["status"] == "delayed":
-        return "⏳ قُبل أمر البيع، لكن هذا السوق يؤخر التنفيذ قليلاً. تحقق من الصفقة بعد دقيقة."
+        return "⏳ قُبل أمر البيع، وهذا السوق يؤخر التنفيذ بضع ثوانٍ. سأرسل لك النتيجة خلال دقيقة."
     text = f"✅ تم البيع: {r['name']}"
     sold, received = Decimal(r.get("sold") or 0), Decimal(r.get("received") or 0)
     # Show the fill only when it is plausible in shares and dollars.

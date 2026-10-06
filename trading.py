@@ -17,6 +17,7 @@ so it can never fill below the price you confirmed.
 """
 
 import os
+import time
 import hashlib
 import logging
 import threading
@@ -212,8 +213,8 @@ def sell(key, shares, min_price):
         shares = min(Decimal(str(shares)), position["shares"]).quantize(SHARE_STEP, rounding=ROUND_DOWN)
         if shares <= 0:
             raise TradingError("لا توجد أسهم للبيع في هذه الصفقة.")
-        result = {"at": _now(), "name": position["name"], "shares": str(shares),
-                  "min_price": str(min_price), "dry_run": dry_run()}
+        result = {"at": _now(), "name": position["name"], "asset_id": position["asset_id"],
+                  "shares": str(shares), "min_price": str(min_price), "dry_run": dry_run()}
 
         if dry_run():
             result.update(ok=True, status="dry_run")
@@ -238,3 +239,47 @@ def sell(key, shares, min_price):
         return result
     finally:
         _sell_lock.release()
+
+
+def await_delayed_fill(order_id, asset_id, placed_at, timeout=60, poll=3):
+    """
+    Live sports markets hold an order a few seconds before matching, so the
+    sale is accepted as "delayed" with nothing filled yet. Polls the CLOB until
+    the order's fills appear or it ends without any. Returns
+    {"status": "matched", "sold", "received"} or {"status": "unfilled"},
+    or None if the outcome is still unknown at the timeout.
+    """
+    from polymarket import PolymarketError
+
+    client = _get_client()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(poll)
+        try:
+            fills = [t for t in client.list_account_trades(
+                         asset_id=asset_id, after=str(int(placed_at) - 5)).iter_items()
+                     if t.taker_order_id == order_id]
+        except PolymarketError as e:
+            logger.warning(f"[TRADING] reading fills of {order_id[:10]}: {_redact(str(e))}")
+            fills = []
+        if fills:
+            sold = sum((t.size for t in fills), Decimal(0))
+            received = sum((t.size * t.price for t in fills), Decimal(0))
+            return _settle(order_id, {"status": "matched", "sold": sold, "received": received})
+        try:
+            order = client.get_order(order_id=order_id)
+        except PolymarketError:
+            continue
+        # Ended with nothing matched: the price left the minimum during the delay.
+        if (order.status or "").lower() not in ("live", "delayed", "matched") and order.size_matched == 0:
+            return _settle(order_id, {"status": "unfilled"})
+    return None
+
+
+def _settle(order_id, outcome):
+    last = STATUS.get("last_order") or {}
+    if last.get("order_id") == order_id:
+        last.update(status=outcome["status"], ok=outcome["status"] == "matched",
+                    sold=str(outcome.get("sold", 0)), received=str(outcome.get("received", 0)))
+    logger.info(f"[TRADING] delayed order {order_id[:10]} {outcome['status']}")
+    return outcome
