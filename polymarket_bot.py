@@ -407,10 +407,18 @@ def health():
 
 @app.route("/api/alerts/status")
 def alerts_status():
-    """Is the monitor running, and did the last alerts go out? No secrets here."""
+    """Is the monitor running, did the last alerts go out, and is selling set up?
+    No secrets here."""
     import alerts
+    import telegram_actions
+    import trading
     from polymarket_monitor import STATE
-    return jsonify({"monitor": STATE, "channels": alerts.status()})
+    return jsonify({
+        "monitor": STATE,
+        "channels": alerts.status(),
+        "telegram_commands": telegram_actions.STATE,
+        "trading": trading.status(),
+    })
 
 
 def start_monitor():
@@ -422,20 +430,31 @@ def start_monitor():
         logger.error(f"خطأ في المراقب: {e}")
 
 
+def start_telegram_commands():
+    try:
+        from telegram_actions import poll_forever
+        poll_forever()
+    except Exception as e:
+        logger.error(f"خطأ في أوامر تيليجرام: {e}")
+
+
 _monitor_started = False
 
 
 def ensure_monitor():
-    """Start the alert monitor once per process (gunicorn never runs __main__)."""
+    """Start the alert monitor and the Telegram command listener once per
+    process (gunicorn never runs __main__)."""
     global _monitor_started
     if _monitor_started or os.environ.get("ENABLE_MONITOR", "1") == "0":
         return
     _monitor_started = True
     threading.Thread(target=start_monitor, daemon=True).start()
     logger.info("✅ مراقب الأسعار شغّال في الخلفية")
+    if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
+        threading.Thread(target=start_telegram_commands, daemon=True).start()
 
 
-# Procfile runs a single gunicorn worker, so this starts exactly one monitor
+# Run a single process (one gunicorn worker): one monitor, one Telegram poller
 ensure_monitor()
 
 

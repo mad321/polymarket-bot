@@ -3,7 +3,9 @@ Polymarket Price Monitor
 ========================
 Checks the open positions every 30 seconds (discovered from the wallet, see
 positions.py) and sends an alert when a price reaches its stop-loss or
-take-profit. It only alerts: it never places orders.
+take-profit. It never places orders itself: alerts for the bot's own wallet
+carry a sell button, and a sale happens only when you confirm it in Telegram
+(telegram_actions.py, trading.py).
 
 Alerts go to every channel configured in alerts.py (Telegram and/or WhatsApp).
 Runs as a background thread of the web app (polymarket_bot.py); its state is
@@ -24,6 +26,8 @@ import pytz
 import requests
 
 import alerts
+import trading
+import telegram_actions
 from positions import get_price_by_slug, load_positions
 
 logger = logging.getLogger(__name__)
@@ -103,6 +107,11 @@ def _signed_usd(value: float) -> str:
     return f"‎{'-' if value < 0 else '+'}${abs(value):.2f}"
 
 
+def _in_trading_wallet(pos: dict) -> bool:
+    wallet = trading.trading_wallet()
+    return bool(wallet) and pos.get("wallet") == wallet
+
+
 def format_alert(pos: dict, price: float, reason: str) -> str:
     """Alert message in Arabic."""
     hit_stop = reason == "stop_loss"
@@ -114,6 +123,8 @@ def format_alert(pos: dict, price: float, reason: str) -> str:
         f"الإجراء: {'بيع فوري - وقف الخسارة' if hit_stop else 'خذ الأرباح'}",
         f"الأسهم: {pos['shares']}",
     ]
+    if _in_trading_wallet(pos):
+        lines.append("المحفظة: محفظة البوت")
     if pos.get("pnl_usd") is not None:
         lines.append(f"الربح / الخسارة: {_signed_usd(pos['pnl_usd'])}")
     if pos.get("url"):
@@ -145,7 +156,10 @@ def check_once(next_alert_at: dict[str, float]) -> None:
         pid = pos.get("id") or pos.get("name", "unknown")
         if now < next_alert_at.get(pid, 0):
             continue
-        sent = alerts.send_alert(format_alert(pos, price, reason))
+        # Positions of the bot's own wallet get a sell button (Telegram only).
+        buttons = (telegram_actions.sell_button(pos["id"])
+                   if trading.enabled() and _in_trading_wallet(pos) else None)
+        sent = alerts.send_alert(format_alert(pos, price, reason), buttons)
         next_alert_at[pid] = now + (ALERT_COOLDOWN if sent else RETRY_AFTER_FAILURE)
         logger.info(f"{reason} alert for {pos['name']} at {price}¢: "
                     f"{'sent' if sent else 'not sent'}")

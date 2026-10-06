@@ -60,31 +60,37 @@ def _record(channel, ok, error=None):
             s["last_error_at"] = _now()
 
 
-def send_telegram(message):
-    token, chat_id = _env("TELEGRAM_BOT_TOKEN"), _env("TELEGRAM_CHAT_ID")
+def telegram_api(method, payload, timeout=10):
+    """Calls a Telegram Bot API method. Returns (result, error), the token redacted."""
+    token = _env("TELEGRAM_BOT_TOKEN")
     try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": message, "disable_web_page_preview": True},
-            timeout=10,
-        )
+        r = requests.post(f"https://api.telegram.org/bot{token}/{method}", json=payload, timeout=timeout)
         try:
             data = r.json()
         except ValueError:
             data = {}
         if r.ok and data.get("ok"):
-            _record("telegram", True)
-            return True
+            return data.get("result"), None
         error = f"HTTP {r.status_code}: {data.get('description') or r.text[:200]}"
     except Exception as e:
         error = str(e)
-    error = _redact(error, token)
+    return None, _redact(error, token)
+
+
+def send_telegram(message, reply_markup=None):
+    payload = {"chat_id": _env("TELEGRAM_CHAT_ID"), "text": message, "disable_web_page_preview": True}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    _, error = telegram_api("sendMessage", payload)
+    if error is None:
+        _record("telegram", True)
+        return True
     logger.error(f"[TELEGRAM ERROR] {error}")
     _record("telegram", False, error)
     return False
 
 
-def send_whatsapp(message):
+def send_whatsapp(message, reply_markup=None):  # buttons are Telegram-only
     token = _env("WHATSAPP_TOKEN")
     try:
         r = requests.post(
@@ -124,13 +130,14 @@ def configured_channels():
     return [name for name, (keys, _) in CHANNELS.items() if all(_env(k) for k in keys)]
 
 
-def send_alert(message):
-    """Sends to every configured channel. True if at least one accepted it."""
+def send_alert(message, reply_markup=None):
+    """Sends to every configured channel (buttons on Telegram only).
+    True if at least one channel accepted it."""
     channels = configured_channels()
     if not channels:
         logger.warning(f"[ALERT NOT SENT: no channel configured] {message}")
         return False
-    results = [CHANNELS[name][1](message) for name in channels]
+    results = [CHANNELS[name][1](message, reply_markup) for name in channels]
     return any(results)
 
 
