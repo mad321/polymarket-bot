@@ -5,7 +5,7 @@ Long-polls Telegram for commands and button taps (no public webhook to
 secure) and acts only on messages from TELEGRAM_CHAT_ID.
 
   /positions          the bot wallet's positions, each with a sell button
-  /paper              paper-trading results so far (paper_trading.py)
+  /paper              paper-trading results and the stop-alert review so far
   🔴 بيع الآن          shows the minimum sale price and asks for confirmation
   ✅ تأكيد البيع       sells (or simulates in dry-run); valid for 2 minutes
 
@@ -51,7 +51,7 @@ def _clean(text):
 HELP = (
     "أوامر البوت:\n"
     "/positions صفقات محفظة البوت، مع زر بيع لكل صفقة.\n"
-    "/paper نتائج التداول على الورق لأسواق البيتكوين (بدون مال حقيقي).\n\n"
+    "/paper نتائج التداول على الورق لأسواق البيتكوين (بدون مال حقيقي)، ومراجعة تنبيهات وقف الخسارة والهدف.\n\n"
     "التنبيهات تصلك هنا تلقائياً. تنبيهات صفقات محفظة البوت يأتي معها زر \"🔴 بيع الآن\"."
 )
 

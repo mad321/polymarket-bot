@@ -23,8 +23,12 @@ Nothing here places orders. Results go to Telegram (a message per paper trade
 and per settlement, a weekly summary, and /paper on demand). The ledger is
 stored as a pinned file in the Telegram chat (paper_store.py).
 
+The same loop and ledger run the stop-loss / take-profit review
+(stop_review.py), which keeps working when paper trading is turned off.
+
 Settings (all optional):
-  PAPER_TRADING=0       turn it off (default on when Telegram is configured)
+  PAPER_TRADING=0       turn paper trading off (default on when Telegram is
+                        configured); the stop-alert review keeps running
   PAPER_STAKE           virtual dollars per trade (default 10)
   PAPER_MIN_EDGE        minimum edge after fees, as a probability (default 0.05)
   PAPER_LEDGER_FILE     keep the ledger in this local file instead of Telegram
@@ -44,6 +48,7 @@ import requests
 
 import alerts
 import paper_store
+import stop_review
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +72,7 @@ MIN_HOURS = 2           # no new trades in the last hours: quotes move faster th
 PRICE_RANGE = (0.05, 0.95)
 SCAN_INTERVAL = 300     # seconds
 SNAPSHOT_HOURS = 24     # model-vs-market snapshot taken this long before expiry
+REVIEW_CHECK_EVERY = 3600  # seconds between resolution checks of one alert's market
 SUMMARY_WEEKDAY, SUMMARY_HOUR = 4, 18   # weekly summary: Friday 18:00, ALERT_TZ
 DEFAULT_FEE_RATE = 0.07  # crypto taker fee: shares × rate × p × (1 − p)
 
@@ -96,13 +102,18 @@ STATE = {
 
 _lock = threading.Lock()
 _ledger = None
+_review_checked = {}  # market id -> last resolution check (epoch seconds)
+
+
+def ledger_available():
+    """Somewhere to keep the ledger: the ledger loop runs only then."""
+    has_telegram = all((os.environ.get(k) or "").strip() for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"))
+    return has_telegram or bool((os.environ.get("PAPER_LEDGER_FILE") or "").strip())
 
 
 def enabled():
-    if (os.environ.get("PAPER_TRADING") or "").strip() == "0":
-        return False
-    has_telegram = all((os.environ.get(k) or "").strip() for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"))
-    return has_telegram or bool((os.environ.get("PAPER_LEDGER_FILE") or "").strip())
+    """Paper trading on (the stop-alert review only needs ledger_available())."""
+    return (os.environ.get("PAPER_TRADING") or "").strip() != "0" and ledger_available()
 
 
 def _iso(dt):
@@ -241,6 +252,7 @@ def new_ledger(now):
         "closed": [],
         "snapshots": {},
         "calibration": {"n": 0, "model": 0.0, "market": 0.0},
+        "level_alerts": {"open": [], "closed": []},  # stop_review.py
         "best_edge": None,
         "last_summary_at": _iso(now),
         "summary_week": None,
@@ -412,6 +424,9 @@ def _results(trades):
 
 
 def summary_text(ledger, now, title):
+    if not enabled():
+        lines = [f"📒 {title}", "التداول على الورق متوقف (PAPER_TRADING=0)."]
+        return "\n".join(lines + (stop_review.summary_lines(ledger) or ["لا توجد تنبيهات مسجلة للمراجعة بعد."]))
     since = _parse_time(ledger["last_summary_at"])
     recent = [t for t in ledger["closed"] if _parse_time(t["closed_at"]) > since]
     lines = [
@@ -431,14 +446,15 @@ def summary_text(ledger, now, title):
     if best:
         lines.append(f"أكبر فارق رآه النموذج: {best['edge'] * 100:.1f} نقطة "
                      f"({SIDES[best['side']]} في {best['name']})، والحد المطلوب للشراء {MIN_EDGE * 100:.0f} نقاط")
+    lines += stop_review.summary_lines(ledger)
     lines.append("⚠️ الحكم يحتاج 4 أسابيع و30 صفقة محسومة على الأقل: نتيجة أسبوع واحد قد تكون حظاً.")
     return "\n".join(lines)
 
 
 def status_text():
     """Reply to /paper."""
-    if not enabled():
-        return "التداول على الورق متوقف. لتشغيله احذف PAPER_TRADING من Render أو اجعله 1."
+    if not ledger_available():
+        return "التداول على الورق ومراجعة التنبيهات يحتاجان إعدادات تيليجرام في Render."
     with _lock:
         if _ledger is None:
             return ("سجل التداول على الورق لم يُحمّل بعد. انتظر دقائق ثم أرسل /paper مرة أخرى."
@@ -447,12 +463,36 @@ def status_text():
 
 # ─── LOOP ────────────────────────────────────────────────────────────────────
 
+def _review_payouts(entries, now):
+    """Resolution of the reviewed alerts' markets, each checked at most hourly."""
+    payouts = {}
+    for market_id, token_id in set(entries):
+        if now.timestamp() - _review_checked.get(market_id, 0) < REVIEW_CHECK_EVERY:
+            continue
+        _review_checked[market_id] = now.timestamp()
+        try:
+            payout = stop_review.fetch_payout(market_id, token_id)
+        except Exception as e:
+            logger.warning(f"[REVIEW] resolution of {market_id}: {e}")
+            continue
+        if payout is not None:
+            payouts[(market_id, token_id)] = payout
+    return payouts
+
+
 def scan_once(ledger, now=None):
-    """One round: settle what resolved, then look for new trades. Returns
-    (messages, changed). Network reads happen before the ledger lock."""
+    """One round: settle what resolved, look for new paper trades, review the
+    stop-loss / take-profit alerts. Returns (messages, changed, error).
+    Network reads happen before the ledger lock; when the market data for
+    paper trading cannot be read, the rest of the round still runs."""
     now = now or datetime.now(timezone.utc)
+    paper = enabled()
     with _lock:
-        due = due_market_ids(ledger, now)
+        before = json.dumps(ledger, sort_keys=True)
+        new_review = "level_alerts" not in ledger  # a ledger from before the review existed
+        stop_review.merge(ledger)
+        due = due_market_ids(ledger, now) if paper else set()
+        review = stop_review.open_entries(ledger)
     winners = {}
     for market_id in due:
         try:
@@ -462,22 +502,40 @@ def scan_once(ledger, now=None):
             continue
         if winner:
             winners[market_id] = winner
+    payouts = _review_payouts(review, now)
 
-    spot, sigma, source = fetch_spot_and_vol()
-    sigma = max(sigma, 0.1)
-    markets = [m for m in fetch_markets() if m["end"] > now]
-    books = fetch_books(t for m in markets for t in m["tokens"].values())
-    STATE.update(markets=len(markets), spot=round(spot, 2), sigma=round(sigma, 4), price_source=source)
+    data, error = None, None
+    if paper:
+        try:
+            spot, sigma, source = fetch_spot_and_vol()
+            sigma = max(sigma, 0.1)
+            markets = [m for m in fetch_markets() if m["end"] > now]
+            books = fetch_books(t for m in markets for t in m["tokens"].values())
+            STATE.update(markets=len(markets), spot=round(spot, 2), sigma=round(sigma, 4), price_source=source)
+            data = (markets, books, spot, sigma)
+        except Exception as e:
+            error = f"{type(e).__name__}: {e}"[:300]
 
     with _lock:
-        before = json.dumps(ledger, sort_keys=True)
-        messages = settle(ledger, winners, now)
-        messages += open_trades(ledger, markets, books, spot, sigma, now)
+        messages = [REVIEW_INTRO] if new_review else []
+        messages += stop_review.settle(ledger, payouts, _iso(now))
+        if paper:
+            messages += settle(ledger, winners, now)
+            if data:
+                messages += open_trades(ledger, *data, now)
         if summary_due(ledger, now):
             messages.append(summary_text(ledger, now, "ملخص الأسبوع للتداول على الورق"))
             ledger.update(summary_week=_week(now), last_summary_at=_iso(now), best_edge=None)
         changed = json.dumps(ledger, sort_keys=True) != before
-    return messages, changed
+    return messages, changed, error
+
+
+REVIEW_INTRO = (
+    "📊 جديد: مراجعة تنبيهات وقف الخسارة والهدف.\n"
+    "عند أول تنبيه لكل صفقة يسجّل البوت كم كنت ستستلم لو بعت كل الأسهم وقتها (بأسعار المشترين الفعلية وبعد الرسوم). "
+    "وبعد حسم السوق يرسل لك هل كان البيع عند التنبيه أفضل أم الانتظار، وبكم.\n"
+    "البوت لا يبيع شيئاً بنفسه، والتنبيهات لا تتغير. المجموع يظهر في /paper وفي ملخص الجمعة."
+)
 
 
 INTRO = (
@@ -485,13 +543,15 @@ INTRO = (
     "البوت يقارن تقدير نموذج حسابي بأسعار أسواق \"هل البيتكوين فوق سعر معيّن يوم كذا\"، "
     "ويسجّل صفقة وهمية بـ ${stake:g} حين يكون السعر أرخص من تقديره بـ {edge:g} نقاط على الأقل بعد الرسوم.\n"
     "تصلك رسالة عند كل صفقة ورقية وعند حسمها، وملخص كل جمعة. أرسل /paper لرؤية النتائج في أي وقت.\n"
+    "ويسجّل أيضاً كل تنبيه وقف خسارة أو هدف، ويخبرك بعد حسم السوق هل كان البيع عند التنبيه أفضل أم الانتظار.\n"
     "السجل محفوظ في ملف مثبّت في هذه المحادثة: لا تحذفه."
 )
 
 
 def run_forever():
     global _ledger
-    STATE.update(running=True, enabled=True)
+    STATE.update(running=True, enabled=enabled())
+    stop_review.ACTIVE = True
     store = paper_store.default_store()
     STATE["store"] = store.describe()
     dirty = False
@@ -505,7 +565,7 @@ def run_forever():
                 with _lock:
                     _ledger = ledger
                 STATE.update(loaded=True, open_trades=len(ledger["open"]))
-            messages, changed = scan_once(_ledger)
+            messages, changed, error = scan_once(_ledger)
             dirty = dirty or changed
             for text in messages:
                 alerts.send_alert(text)
@@ -514,7 +574,7 @@ def run_forever():
                     snapshot = json.loads(json.dumps(_ledger))
                 store.save(snapshot)  # on failure dirty stays set, so the next round retries
                 dirty = False
-            STATE.update(last_scan_at=_iso(datetime.now(timezone.utc)), last_error=None)
+            STATE.update(last_scan_at=_iso(datetime.now(timezone.utc)), last_error=error)
         except Exception as e:
             STATE["last_error"] = f"{type(e).__name__}: {e}"[:300]
             logger.error(f"[PAPER] {STATE['last_error']}")
