@@ -155,6 +155,15 @@ class FakeClient:
         self.placed.append(kwargs)
         return self.order
 
+    fills = ()
+    order_status = SimpleNamespace(status="DELAYED", size_matched=Decimal(0))
+
+    def list_account_trades(self, **kwargs):
+        return SimpleNamespace(iter_items=lambda: iter(self.fills))
+
+    def get_order(self, order_id):
+        return self.order_status
+
 
 class TradingTests(unittest.TestCase):
     def setUp(self):
@@ -211,6 +220,25 @@ class TradingTests(unittest.TestCase):
             result = trading.sell(KEY, "60", "0.24")
         self.assertFalse(result["ok"])
         self.assertIn("السعر نزل", result["message"])
+
+    def test_delayed_sale_reads_its_fills(self):
+        trading._client.fills = (
+            SimpleNamespace(taker_order_id="0xabc", size=Decimal("5"), price=Decimal("0.14")),
+            SimpleNamespace(taker_order_id="0xother", size=Decimal("9"), price=Decimal("0.5")),
+        )
+        trading.STATUS["last_order"] = {"order_id": "0xabc", "status": "delayed"}
+        outcome = trading.await_delayed_fill("0xabc", ASSET, time.time(), timeout=1, poll=0)
+        self.assertEqual((outcome["status"], outcome["sold"], outcome["received"]),
+                         ("matched", Decimal("5"), Decimal("0.70")))
+        self.assertEqual(trading.STATUS["last_order"]["status"], "matched")
+
+    def test_delayed_sale_that_ends_unfilled(self):
+        trading._client.order_status = SimpleNamespace(status="CANCELED", size_matched=Decimal(0))
+        outcome = trading.await_delayed_fill("0xabc", ASSET, time.time(), timeout=1, poll=0)
+        self.assertEqual(outcome, {"status": "unfilled"})
+
+    def test_delayed_sale_still_unknown_at_the_timeout(self):
+        self.assertIsNone(trading.await_delayed_fill("0xabc", ASSET, time.time(), timeout=0.05, poll=0))
 
     def test_one_sale_at_a_time(self):
         with trading._sell_lock, self.assertRaisesRegex(trading.TradingError, "عملية بيع أخرى"):
@@ -302,6 +330,29 @@ class TelegramFlowTests(unittest.TestCase):
         sell.assert_called_once_with(KEY, Decimal("60.45"), Decimal("0.24"))
         self.assertIn("✅ تم البيع", self.sent()[-1]["text"])
         self.assertIn("14.51", self.sent()[-1]["text"])
+
+    def test_delayed_sale_gets_a_follow_up_message(self):
+        trading._client = FakeClient(order=SimpleNamespace(
+            ok=True, status="delayed", order_id="0xabc",
+            making_amount=Decimal(0), taking_amount=Decimal(0)))
+
+        class RunNow:  # run the follow-up thread inline
+            def __init__(self, target, args, daemon):
+                self.run = lambda: target(*args)
+
+            def start(self):
+                self.run()
+
+        outcome = {"status": "matched", "sold": Decimal("5"), "received": Decimal("0.70")}
+        with self.settings(TRADING_DRY_RUN="0"), \
+                mock.patch("telegram_actions.threading.Thread", RunNow), \
+                mock.patch("trading.await_delayed_fill", return_value=outcome) as wait:
+            telegram_actions.handle_update(self.tap(f"c:{KEY}:0.14:5:{int(time.time())}"))
+        self.assertEqual(wait.call_args.args[:2], ("0xabc", ASSET))
+        first, follow_up = [p["text"] for p in self.sent()][-2:]
+        self.assertIn("سأرسل لك النتيجة", first)
+        self.assertIn("✅ تم البيع", follow_up)
+        self.assertIn("$0.70", follow_up)
 
     def test_expired_confirmation_sells_nothing(self):
         stale = int(time.time()) - telegram_actions.CONFIRM_TTL - 5
