@@ -410,6 +410,7 @@ def alerts_status():
     """Is the monitor running, did the last alerts go out, and is selling set up?
     No secrets here."""
     import alerts
+    import paper_trading
     import telegram_actions
     import trading
     from polymarket_monitor import STATE
@@ -418,6 +419,7 @@ def alerts_status():
         "channels": alerts.status(),
         "telegram_commands": telegram_actions.STATE,
         "trading": trading.status(),
+        "paper_trading": paper_trading.STATE,
     })
 
 
@@ -438,12 +440,20 @@ def start_telegram_commands():
         logger.error(f"خطأ في أوامر تيليجرام: {e}")
 
 
+def start_paper_trading():
+    try:
+        from paper_trading import run_forever
+        run_forever()
+    except Exception as e:
+        logger.error(f"خطأ في التداول على الورق: {e}")
+
+
 _monitor_started = False
 
 
 def ensure_monitor():
-    """Start the alert monitor and the Telegram command listener once per
-    process (gunicorn never runs __main__)."""
+    """Start the alert monitor, the Telegram command listener and paper
+    trading once per process (gunicorn never runs __main__)."""
     global _monitor_started
     if _monitor_started or os.environ.get("ENABLE_MONITOR", "1") == "0":
         return
@@ -452,6 +462,9 @@ def ensure_monitor():
     logger.info("✅ مراقب الأسعار شغّال في الخلفية")
     if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
         threading.Thread(target=start_telegram_commands, daemon=True).start()
+    import paper_trading
+    if paper_trading.enabled():
+        threading.Thread(target=start_paper_trading, daemon=True).start()
 
 
 # Run a single process (one gunicorn worker): one monitor, one Telegram poller

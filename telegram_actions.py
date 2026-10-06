@@ -5,6 +5,7 @@ Long-polls Telegram for commands and button taps (no public webhook to
 secure) and acts only on messages from TELEGRAM_CHAT_ID.
 
   /positions          the bot wallet's positions, each with a sell button
+  /paper              paper-trading results so far (paper_trading.py)
   🔴 بيع الآن          shows the minimum sale price and asks for confirmation
   ✅ تأكيد البيع       sells (or simulates in dry-run); valid for 2 minutes
 
@@ -19,6 +20,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 import alerts
+import paper_trading
 import trading
 
 logger = logging.getLogger(__name__)
@@ -48,7 +50,8 @@ def _clean(text):
 
 HELP = (
     "أوامر البوت:\n"
-    "/positions صفقات محفظة البوت، مع زر بيع لكل صفقة.\n\n"
+    "/positions صفقات محفظة البوت، مع زر بيع لكل صفقة.\n"
+    "/paper نتائج التداول على الورق لأسواق البيتكوين (بدون مال حقيقي).\n\n"
     "التنبيهات تصلك هنا تلقائياً. تنبيهات صفقات محفظة البوت يأتي معها زر \"🔴 بيع الآن\"."
 )
 
@@ -110,6 +113,9 @@ def _dry_run_note():
 
 def handle_command(text):
     command = text.strip().split()[0].split("@")[0].lower()
+    if command == "/paper":
+        _reply(paper_trading.status_text())
+        return
     if command != "/positions":
         _reply(HELP)
         return
@@ -278,6 +284,7 @@ def poll_forever():
     STATE["chat_id_setting"] = {"ends_with": _chat_id()[-3:], "has_hidden_characters": _chat_id() != raw}
     alerts.telegram_api("setMyCommands", {"commands": [
         {"command": "positions", "description": "صفقات محفظة البوت وأزرار البيع"},
+        {"command": "paper", "description": "نتائج التداول على الورق (بدون مال)"},
     ]})
     trading.check_geoblock()
 
