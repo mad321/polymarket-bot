@@ -1,69 +1,69 @@
-# 🏛️ Dual-AI Trading Arena
+# 📊 مراقب صفقات بوليماركت
 
-نظام تداول متقدم يجلب بيانات حية من Polymarket ويحللها باستخدام Claude و Gemini.
+بوت يراقب صفقاتك المفتوحة في بوليماركت، ويرسل تنبيهاً في تيليجرام عندما يصل السعر لوقف الخسارة أو الهدف، ويبيع صفقات محفظة البوت بعد تأكيدك من تيليجرام.
 
-## ✨ المميزات
+## ✨ ماذا يفعل
 
-- **جلب بيانات حية من Polymarket**: الاتصال المباشر مع Gamma API
-- **تحليل ذكي ثنائي**: Claude Haiku و Gemini Flash
-- **معايير تداول صارمة**: التحقق من السيولة والوقت المتبقي
-- **واجهة عربية كاملة**: RTL Layout مع دعم شامل
-- **API endpoints**: للتكامل مع أنظمة أخرى
+- **مراقبة المحافظ:** يقرأ الصفقات المفتوحة كل 30 ثانية من Data API v2، لمحفظة `WALLET_ADDRESS` ومحفظة البوت `TRADING_WALLET`.
+- **تنبيهات تيليجرام:** عند وقف الخسارة أو الهدف. انظر "تنبيهات تيليجرام".
+- **زر البيع:** لصفقات محفظة البوت فقط، وبعد تأكيد. انظر "زر البيع في تيليجرام".
+- **الصفحات:** `/` تعرض الصفقات، و`/api/positions` تغذي لوحة Lovable، و`/api/alerts/status` تعرض حالة المراقب والتنبيهات والتداول.
 
-## 🚀 البدء السريع
+## 🚀 التشغيل محلياً
 
 ```bash
-# 1. استنساخ المشروع
 git clone https://github.com/mad321/polymarket-bot.git
 cd polymarket-bot
-
-# 2. تثبيت المكتبات
 pip install -r requirements.txt
-
-# 3. إعداد المفاتيح
-cp .env.example .env
-# عدّل .env وأضف المفاتيح
-
-# 4. التشغيل
-python app.py
+cp .env.example .env   # ثم عدّل القيم
+python polymarket_bot.py
 ```
 
 التطبيق يعمل على: **http://localhost:5000**
 
+⚠️ لا تشغّل نسخة محلية بنفس `TELEGRAM_BOT_TOKEN` الذي يستخدمه Render: النسختان تتنافسان على أوامر تيليجرام وضغطات الأزرار. للتجربة محلياً اترك `TELEGRAM_BOT_TOKEN` فارغاً، أو أضف `ENABLE_MONITOR=0` لتشغيل الصفحات فقط بدون المراقب ومستقبل الأوامر.
+
 ## 📚 الملفات الرئيسية
 
-- `app.py` - تطبيق Flask الرئيسي
-- `config.py` - الإعدادات والثوابت
-- `polymarket_service.py` - خدمة Polymarket API
-- `ai_analysis.py` - تحليلات Claude و Gemini
-- `requirements.txt` - المكتبات المطلوبة
+| الملف | الدور |
+| - | - |
+| `polymarket_bot.py` | تطبيق Flask: الصفحات وواجهات API، ويشغّل المراقب ومستقبل أوامر تيليجرام في الخلفية |
+| `polymarket_monitor.py` | يفحص الصفقات كل 30 ثانية ويرسل التنبيهات |
+| `positions.py` | يقرأ صفقات المحافظ من Data API v2 ويطبق إعدادات `config.json` |
+| `alerts.py` | الإرسال إلى تيليجرام، وإلى واتساب إن كانت إعداداته موجودة |
+| `telegram_actions.py` | أوامر تيليجرام وأزرار البيع |
+| `trading.py` | البيع من محفظة البوت عبر مكتبة بوليماركت الرسمية |
+| `config.json` | إعدادات اختيارية لكل سوق: الاسم، وقف الخسارة، الهدف، الإخفاء |
+
+ملفات النسخة السابقة (Dual-AI Trading Arena) ما زالت في المستودع، لكن التطبيق الحالي لا يستخدمها: `ai_analysis.py` و`polymarket_service.py` و`config.py`. دليلها في [README_TRADING.md](README_TRADING.md).
 
 ## 🧪 الاختبارات
 
 ```bash
-# اختبار محلي بدون إنترنت
-python test_local.py
+# اختبارات المراقب والتنبيهات والبيع (بدون إنترنت)
+python -m unittest test_alerts.py test_trading.py
 
-# اختبار كامل مع APIs
-python test_apis.py
-
-# تشخيص سريع
-python diagnose.py
+# فحوص إضافية
+python test_local.py   # محلي
+python test_apis.py    # مع الاتصال بالـ APIs
+python diagnose.py     # تشخيص سريع
 ```
 
-## 📖 التوثيق
+التفاصيل في [TESTING.md](TESTING.md).
 
-- [README_TRADING.md](README_TRADING.md) - دليل شامل
-- [TESTING.md](TESTING.md) - دليل الاختبارات
+## 🔑 متغيرات البيئة
 
-## 🔑 متغيرات البيئة المطلوبة
+| المتغير | الاستخدام |
+| - | - |
+| `WALLET_ADDRESS` | المحفظة التي تُراقب صفقاتها، ويمكن وضع عدة محافظ مفصولة بفواصل |
+| `TELEGRAM_BOT_TOKEN`، `TELEGRAM_CHAT_ID` | التنبيهات وأوامر تيليجرام (انظر "تنبيهات تيليجرام") |
+| `TRADING_WALLET`، `TRADING_PRIVATE_KEY`، `TRADING_ENABLED`، `TRADING_DRY_RUN` | زر البيع (انظر "زر البيع في تيليجرام") |
+| `STOP_LOSS_PCT`، `TAKE_PROFIT_PCT` | الحدود الافتراضية: 30% تحت سعر الشراء و50% فوقه |
+| `ALERT_COOLDOWN`، `STARTUP_ALERT`، `ALERT_TZ` | خيارات التنبيهات |
+| `ENABLE_MONITOR` | `0` لتشغيل الصفحات فقط بدون المراقب ومستقبل الأوامر |
+| `CLAUDE_API_KEY`، `GEMINI_API_KEY` | لملفات النسخة السابقة فقط |
 
-```
-CLAUDE_API_KEY=your_key_here
-GEMINI_API_KEY=your_key_here
-PRIVATE_KEY=your_key_here (اختياري)
-WALLET_ADDRESS=your_address_here (اختياري)
-```
+القائمة مع أمثلة في `.env.example`.
 
 ## 🔔 تنبيهات تيليجرام
 
@@ -107,17 +107,13 @@ WALLET_ADDRESS=your_address_here (اختياري)
 
 ملاحظة: خوادم Render في دول يسمح فيها بوليماركت **بإغلاق الصفقات (البيع) فقط**، لذلك لا يمكن الشراء من هذا الخادم أصلاً.
 
-## 📊 الأسواق المدعومة
-
-- Bitcoin Daily (يومي)
-- Bitcoin Weekly (أسبوعي)
-- Fed Rates (قرارات البنك الفيدرالي)
-
 ## 🌐 النشر على Render
 
-أضف متغيرات البيئة في الإعدادات وادفع الكود.
+- Render ينشر تلقائياً كل دمج في فرع `monitor-branch`.
+- أمر التشغيل يُضبط في إعدادات الخدمة (**Settings → Start Command**)، وRender لا يقرأ ملف `Procfile`. الخدمة الحالية تعمل بخادم Flask المدمج (Werkzeug)، أي بأمر مثل `python polymarket_bot.py`.
+- **عملية واحدة فقط:** التطبيق يشغّل المراقب ومستقبل أوامر تيليجرام داخل نفس العملية، وتيليجرام لا يسمح إلا بمستقبل واحد لكل رمز. إذا استخدمت gunicorn فبعامل واحد فقط، كما في `Procfile`: `gunicorn --workers 1 ... polymarket_bot:app`.
+- على الخطة المجانية ينام الخادم بعد 15 دقيقة بلا زيارات، ويتوقف المراقب معه. منبّه خارجي يزور `/health` كل 5 دقائق يبقيه يعمل.
 
 ---
 
-**الإصدار:** 1.0.0  
-**آخر تحديث:** سبتمبر 2026
+**آخر تحديث:** أكتوبر 2026

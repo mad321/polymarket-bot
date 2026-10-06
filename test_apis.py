@@ -190,7 +190,10 @@ print("\n\n🚀 5. اختبار التطبيق Flask:")
 print("-" * 60)
 
 try:
-    from app import app
+    # Importing the app must not start its monitor and Telegram threads:
+    # a second Telegram poller would take the live bot's commands and taps.
+    os.environ["ENABLE_MONITOR"] = "0"
+    from polymarket_bot import app
 
     print("✅ تم تحميل تطبيق Flask")
 
@@ -203,7 +206,7 @@ try:
         response = client.get("/")
         if response.status_code == 200:
             print(f"   ✅ حالة 200 OK")
-            if "حلبة الذكاء الاصطناعي" in response.get_data(as_text=True):
+            if "مراقب صفقات بوليماركت" in response.get_data(as_text=True):
                 print(f"   ✅ الواجهة العربية موجودة")
         else:
             print(f"   ❌ خطأ: حالة {response.status_code}")
@@ -227,6 +230,6 @@ print("✅ انتهى الاختبار")
 print("="*60)
 print("\n📋 الخطوات التالية:")
 print("   1. تأكد من ملء جميع المفاتيح في ملف .env")
-print("   2. شغّل التطبيق: python app.py")
+print("   2. شغّل التطبيق: python polymarket_bot.py")
 print("   3. افتح المتصفح على: http://localhost:5000")
-print("   4. اختر السوق المطلوب والاستعلام\n")
+print("   4. افتح /api/alerts/status للتأكد أن المراقب يعمل\n")
