@@ -238,9 +238,26 @@ class TelegramFlowTests(unittest.TestCase):
         return [p for m, p in self.calls if m == method]
 
     def test_ignores_other_chats(self):
+        before = telegram_actions.STATE["ignored_other_chat"]
         with self.settings():
             telegram_actions.handle_update(self.tap(f"s:{KEY}", chat="999"))
         self.assertEqual(self.calls, [])
+        self.assertEqual(telegram_actions.STATE["ignored_other_chat"], before + 1)
+        self.assertEqual(telegram_actions.STATE["last_ignored_chat_ends_with"], "999")
+
+    def test_hidden_direction_marks_do_not_block_commands(self):
+        # RTL keyboards and copy-paste can add marks to the text and to the id.
+        with env(TELEGRAM_CHAT_ID="‏42‎"):
+            telegram_actions.handle_update(
+                {"update_id": 4, "message": {"chat": {"id": 42}, "text": "‏/start"}})
+        self.assertIn("/positions", self.sent()[-1]["text"])
+        self.assertEqual(self.sent()[-1]["chat_id"], "42")
+
+    def test_plain_text_gets_the_help(self):
+        with self.settings():
+            telegram_actions.handle_update(
+                {"update_id": 5, "message": {"chat": {"id": 42}, "text": "مرحبا"}})
+        self.assertIn("/positions", self.sent()[-1]["text"])
 
     def test_sell_tap_asks_for_confirmation(self):
         with self.settings():
