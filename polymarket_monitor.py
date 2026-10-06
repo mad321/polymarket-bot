@@ -153,7 +153,8 @@ def check_once(next_alert_at: dict[str, float]) -> None:
             continue
         past_level += 1
 
-        pid = pos.get("id") or pos.get("name", "unknown")
+        # Per wallet: the same market held in two wallets alerts for each.
+        pid = f"{pos.get('wallet', '')}:{pos.get('id') or pos.get('name', 'unknown')}"
         if now < next_alert_at.get(pid, 0):
             continue
         # Positions of the bot's own wallet get a sell button (Telegram only).

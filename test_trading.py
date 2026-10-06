@@ -80,6 +80,31 @@ class PositionsV2Tests(unittest.TestCase):
         with env(WALLET_ADDRESS=f"{MAIN_WALLET}, {BOT_WALLET.upper()}", TRADING_WALLET=BOT_WALLET):
             self.assertEqual(positions.watched_wallets(), [MAIN_WALLET, BOT_WALLET])
 
+    def test_old_config_levels_skip_the_bot_wallet(self):
+        # An old main-account entry (bought at 52¢, stop 30¢) must not turn a
+        # new bot trade bought at 23¢ into an instant stop-loss alert.
+        config = [{"slug": "saudi-sep-24", "name": "old trade", "stop_loss": 30, "take_profit": 85}]
+        row = v2_row(avg_price=0.23, current_price=0.205)
+
+        def fake_get(url, params, timeout):
+            return page([row])
+        with env(WALLET_ADDRESS=MAIN_WALLET, TRADING_WALLET=BOT_WALLET), \
+                mock.patch("positions.load_config", return_value=config), \
+                mock.patch("positions.requests.get", side_effect=fake_get):
+            rows, _, _ = positions.load_positions()
+        by_wallet = {p["wallet"]: p for p in rows}
+        self.assertEqual((by_wallet[MAIN_WALLET]["stop_loss"], by_wallet[MAIN_WALLET]["name"]), (30, "old trade"))
+        bot = by_wallet[BOT_WALLET]
+        self.assertEqual((bot["stop_loss"], bot["take_profit"]), (16.1, 34.5))  # from its own 23¢
+        self.assertNotEqual(bot["name"], "old trade")
+        self.assertIsNone(monitor.level_hit(bot, 20.5))
+
+    def test_config_entry_can_target_the_bot_wallet(self):
+        config = [{"slug": "saudi-sep-24", "wallet": BOT_WALLET.upper(), "stop_loss": 20}]
+        with env(TRADING_WALLET=BOT_WALLET):
+            self.assertEqual(positions.overrides_for(config, BOT_WALLET)["saudi-sep-24"]["stop_loss"], 20)
+            self.assertEqual(positions.overrides_for(config, MAIN_WALLET), {})
+
     def test_one_failing_wallet_keeps_the_other(self):
         def fake_get(url, params, timeout):
             if params["user"] == BOT_WALLET:
@@ -328,6 +353,15 @@ class MonitorButtonTests(unittest.TestCase):
         args = self.run_check(BOT_WALLET, TRADING_ENABLED="1").args
         self.assertIn("محفظة البوت", args[0])
         self.assertEqual(args[1]["inline_keyboard"][0][0]["callback_data"], f"s:{KEY}")
+
+    def test_same_market_in_two_wallets_alerts_for_each(self):
+        both = [dict(id=ASSET, wallet=w, name="n", shares=60, current_price=25.0,
+                     stop_loss=32.2, take_profit=69.0) for w in (MAIN_WALLET, BOT_WALLET)]
+        with env(TRADING_WALLET=BOT_WALLET), \
+                mock.patch.object(monitor, "load_positions", return_value=(both, "wallet", None)), \
+                mock.patch.object(monitor.alerts, "send_alert", return_value=True) as send:
+            monitor.check_once({})
+        self.assertEqual(send.call_count, 2)
 
     def test_no_button_when_disabled_or_for_other_wallets(self):
         self.assertIsNone(self.run_check(BOT_WALLET).args[1])
