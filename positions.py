@@ -109,6 +109,7 @@ def _from_wallet(raw, overrides, wallet=""):
             "title": title,
             "outcome": outcome,
             "slug": slug,
+            "event": p.get("event_slug") or slug,
             "url": f"https://polymarket.com/event/{p.get('event_slug') or slug}",
             "shares": round(float(p.get("current_size") or 0), 2),
             "buy_price": buy,

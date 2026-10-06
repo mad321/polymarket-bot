@@ -410,6 +410,7 @@ def alerts_status():
     """Is the monitor running, did the last alerts go out, and is selling set up?
     No secrets here."""
     import alerts
+    import exposure
     import paper_trading
     import telegram_actions
     import trading
@@ -420,6 +421,7 @@ def alerts_status():
         "telegram_commands": telegram_actions.STATE,
         "trading": trading.status(),
         "paper_trading": paper_trading.STATE,
+        "position_size": exposure.STATE,
     })
 
 

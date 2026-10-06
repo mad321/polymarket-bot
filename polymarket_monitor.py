@@ -15,6 +15,9 @@ Optional settings:
   ALERT_COOLDOWN  seconds before re-alerting the same position (default 3600)
   STARTUP_ALERT   "0" to skip the "monitor started" message
   ALERT_TZ        time zone for alert timestamps (default Asia/Riyadh)
+
+Every 10 minutes it also checks position sizes against the capital
+(exposure.py, EXPOSURE_ALERT_PCT).
 """
 
 import os
@@ -26,6 +29,7 @@ import pytz
 import requests
 
 import alerts
+import exposure
 import stop_review
 import trading
 import telegram_actions
@@ -169,6 +173,12 @@ def check_once(next_alert_at: dict[str, float]) -> None:
         except Exception:
             logger.exception(f"Recording the {reason} alert of {pos['name']} for review failed")
 
+    if source == "wallet":
+        try:
+            exposure.check(positions, alerts.send_alert)  # every 10 minutes
+        except Exception:
+            logger.exception("Position size check failed")
+
     STATE.update(last_check_at=_utc_now(), positions=len(positions),
                  past_level=past_level, source=source, error=error)
     logger.info(f"Checked {len(positions)} position(s) from {source}, "
@@ -181,6 +191,7 @@ def main():
     logger.info(f"Polymarket monitor starting: every {CHECK_INTERVAL}s, "
                 f"cooldown {ALERT_COOLDOWN}s, channels: {', '.join(channels) or 'none'}")
     STATE.update(running=True, started_at=_utc_now())
+    exposure.ACTIVE = True
 
     if os.environ.get("STARTUP_ALERT", "1") != "0":
         alerts.send_alert(STARTUP_MESSAGE)
