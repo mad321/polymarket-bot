@@ -26,6 +26,7 @@ import pytz
 import requests
 
 import alerts
+import stop_review
 import trading
 import telegram_actions
 from positions import get_price_by_slug, load_positions
@@ -155,15 +156,18 @@ def check_once(next_alert_at: dict[str, float]) -> None:
 
         # Per wallet: the same market held in two wallets alerts for each.
         pid = f"{pos.get('wallet', '')}:{pos.get('id') or pos.get('name', 'unknown')}"
-        if now < next_alert_at.get(pid, 0):
-            continue
-        # Positions of the bot's own wallet get a sell button (Telegram only).
-        buttons = (telegram_actions.sell_button(pos["id"])
-                   if trading.enabled() and _in_trading_wallet(pos) else None)
-        sent = alerts.send_alert(format_alert(pos, price, reason), buttons)
-        next_alert_at[pid] = now + (ALERT_COOLDOWN if sent else RETRY_AFTER_FAILURE)
-        logger.info(f"{reason} alert for {pos['name']} at {price}¢: "
-                    f"{'sent' if sent else 'not sent'}")
+        if now >= next_alert_at.get(pid, 0):
+            # Positions of the bot's own wallet get a sell button (Telegram only).
+            buttons = (telegram_actions.sell_button(pos["id"])
+                       if trading.enabled() and _in_trading_wallet(pos) else None)
+            sent = alerts.send_alert(format_alert(pos, price, reason), buttons)
+            next_alert_at[pid] = now + (ALERT_COOLDOWN if sent else RETRY_AFTER_FAILURE)
+            logger.info(f"{reason} alert for {pos['name']} at {price}¢: "
+                        f"{'sent' if sent else 'not sent'}")
+        try:
+            stop_review.record(pos, reason, price)  # once per position and level
+        except Exception:
+            logger.exception(f"Recording the {reason} alert of {pos['name']} for review failed")
 
     STATE.update(last_check_at=_utc_now(), positions=len(positions),
                  past_level=past_level, source=source, error=error)

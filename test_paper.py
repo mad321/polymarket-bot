@@ -17,6 +17,8 @@ os.environ["ENABLE_MONITOR"] = "0"
 
 import paper_store
 import paper_trading as pt
+import polymarket_monitor as monitor
+import stop_review
 import telegram_actions
 
 NOW = datetime(2026, 10, 6, 15, 0, tzinfo=timezone.utc)   # a Tuesday
@@ -224,8 +226,9 @@ class ScheduleTests(unittest.TestCase):
         with mock.patch("paper_trading.fetch_spot_and_vol", return_value=(87500, 0.3, "binance")), \
                 mock.patch("paper_trading.fetch_markets", return_value=[]), \
                 mock.patch("paper_trading.fetch_books", return_value={}):
-            msgs, changed = pt.scan_once(ledger, friday_evening)
+            msgs, changed, error = pt.scan_once(ledger, friday_evening)
         self.assertTrue(changed)
+        self.assertIsNone(error)
         self.assertIn("ملخص الأسبوع", msgs[0])
         self.assertEqual(ledger["summary_week"], pt._week(friday_evening))
         self.assertIsNone(ledger["best_edge"])
@@ -311,11 +314,12 @@ class RunLoopTests(unittest.TestCase):
     def setUp(self):
         pt._ledger = None
         self.addCleanup(setattr, pt, "_ledger", None)
+        self.addCleanup(setattr, stop_review, "ACTIVE", False)
 
     def run_once(self, store):
         with mock.patch("paper_trading.paper_store.default_store", return_value=store), \
                 mock.patch("paper_trading.time.sleep", side_effect=Stop), \
-                mock.patch("paper_trading.scan_once", return_value=(["رسالة"], False)), \
+                mock.patch("paper_trading.scan_once", return_value=(["رسالة"], False, None)), \
                 mock.patch("paper_trading.alerts.send_alert") as send:
             with self.assertRaises(Stop):
                 pt.run_forever()
@@ -348,10 +352,149 @@ class TelegramCommandTests(unittest.TestCase):
             telegram_actions.handle_command("/paper")
         self.assertIn("التداول على الورق حتى الآن", api.call_args.args[1]["text"])
 
-    def test_paper_command_when_turned_off(self):
+    def test_paper_command_when_turned_off_still_shows_the_review(self):
+        pt._ledger = pt.new_ledger(NOW)
+        self.addCleanup(setattr, pt, "_ledger", None)
         with mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": TOKEN, "TELEGRAM_CHAT_ID": "42",
                                           "PAPER_TRADING": "0"}):
-            self.assertIn("متوقف", pt.status_text())
+            text = pt.status_text()
+        self.assertIn("التداول على الورق متوقف", text)
+        self.assertIn("لا توجد تنبيهات مسجلة للمراجعة بعد", text)
+
+
+# ─── STOP-ALERT REVIEW ──────────────────────────────────────────────────────
+
+ASSET = "75352308982559360810664047376087173948352198121226374582720762265018774664169"
+
+
+def json_response(data):
+    r = mock.Mock()
+    r.raise_for_status.return_value = None
+    r.json.return_value = data
+    return r
+
+
+def wallet_pos(**extra):
+    pos = {"id": ASSET, "wallet": "0xmain", "name": "كازاخستان تفوز", "shares": 46.0,
+           "buy_price": 52.0, "current_price": 28.0, "stop_loss": 30.0, "take_profit": 85.0}
+    pos.update(extra)
+    return pos
+
+
+class StopReviewTests(unittest.TestCase):
+    def setUp(self):
+        stop_review.ACTIVE = True
+        stop_review._pending.clear()
+        stop_review._seen.clear()
+        self.addCleanup(setattr, stop_review, "ACTIVE", False)
+        self.addCleanup(stop_review._pending.clear)
+        self.addCleanup(stop_review._seen.clear)
+
+    def gamma_and_book(self, bids):
+        market = [{"id": "77", "question": "Kazakhstan win?", "feesEnabled": True,
+                   "feeSchedule": {"rate": 0.05}}]
+        return [json_response(market), json_response({"bids": bids})]
+
+    def test_simulate_sell_walks_the_bids_and_pays_the_fee(self):
+        sold, proceeds = stop_review.simulate_sell(
+            [{"price": "0.27", "size": "10"}, {"price": "0.28", "size": "30"}], 46, 0.05)
+        self.assertEqual(sold, 40)  # the book holds only 40 shares
+        fee = 30 * 0.05 * 0.28 * 0.72 + 10 * 0.05 * 0.27 * 0.73
+        self.assertAlmostEqual(proceeds, 30 * 0.28 + 10 * 0.27 - fee, places=3)
+
+    def test_records_the_first_alert_once_with_the_sale_value_then(self):
+        bids = [{"price": "0.28", "size": "100"}]
+        with mock.patch("stop_review.requests.get", side_effect=self.gamma_and_book(bids)) as get:
+            stop_review.record(wallet_pos(), "stop_loss", 28.0)
+            stop_review.record(wallet_pos(), "stop_loss", 27.0)  # already recorded: no lookup
+        self.assertEqual(get.call_count, 2)
+        e = stop_review._pending[0]
+        self.assertEqual((e["market_id"], e["kind"], e["wallet"], e["best_bid"], e["sold_shares"]),
+                         ("77", "stop_loss", "main", 0.28, 46))
+        self.assertAlmostEqual(e["proceeds"], 46 * 0.28 * (1 - 0.05 * 0.72), places=4)
+
+    def test_inactive_or_non_wallet_positions_are_not_recorded(self):
+        with mock.patch("stop_review.requests.get") as get:
+            stop_review.record(wallet_pos(id="kazakhstan_win_1"), "stop_loss", 28.0)
+            stop_review.ACTIVE = False
+            stop_review.record(wallet_pos(), "stop_loss", 28.0)
+        get.assert_not_called()
+
+    def test_a_failed_lookup_is_retried_on_the_next_check(self):
+        with mock.patch("stop_review.requests.get", side_effect=ConnectionError("down")):
+            stop_review.record(wallet_pos(), "stop_loss", 28.0)
+        self.assertEqual(stop_review._pending, [])
+        with mock.patch("stop_review.requests.get",
+                        side_effect=self.gamma_and_book([{"price": "0.28", "size": "100"}])):
+            stop_review.record(wallet_pos(), "stop_loss", 28.0)
+        self.assertEqual(len(stop_review._pending), 1)
+
+    def test_merge_settle_and_summary(self):
+        ledger = pt.new_ledger(NOW)
+        with mock.patch("stop_review.requests.get",
+                        side_effect=self.gamma_and_book([{"price": "0.28", "size": "100"}])):
+            stop_review.record(wallet_pos(), "stop_loss", 28.0)
+        self.assertTrue(stop_review.merge(ledger))
+        self.assertFalse(stop_review.merge(ledger))
+        self.assertEqual(stop_review.open_entries(ledger), [("77", ASSET)])
+
+        # Kazakhstan lost: selling at the alert was better
+        msgs = stop_review.settle(ledger, {("77", ASSET): 0.0}, "2026-10-07T00:00:00+00:00")
+        e = ledger["level_alerts"]["closed"][0]
+        self.assertEqual(e["held_value"], 0)
+        self.assertAlmostEqual(e["sold_value"], e["proceeds"])
+        self.assertIn("📊 مراجعة تنبيه وقف الخسارة: كازاخستان تفوز", msgs[0])
+        self.assertIn("البيع كان أفضل بـ $12.", msgs[0])
+        lines = stop_review.summary_lines(ledger)
+        self.assertIn("مراجعة تنبيهات وقف الخسارة (1 حُسمت)", lines[0])
+        self.assertIn("البيع أفضل", lines[0])
+
+    def test_holding_wins_and_unsold_shares_count_as_held(self):
+        ledger = pt.new_ledger(NOW)
+        ledger["level_alerts"]["open"].append({
+            "key": "k", "kind": "take_profit", "token_id": ASSET, "market_id": "77", "name": "x",
+            "best_bid": 0.8, "shares": 10.0, "sold_shares": 6.0, "proceeds": 4.8})
+        stop_review.settle(ledger, {("77", ASSET): 1.0}, "t")
+        e = ledger["level_alerts"]["closed"][0]
+        self.assertEqual((e["held_value"], e["sold_value"]), (10.0, 8.8))
+
+    def test_fetch_payout_reads_the_tokens_outcome(self):
+        cases = [
+            ({"closed": False}, None),
+            ({"closed": True, "clobTokenIds": json.dumps(["1", ASSET]), "outcomePrices": '["1", "0"]'}, 0.0),
+            ({"closed": True, "clobTokenIds": json.dumps(["1", ASSET]), "outcomePrices": '["0", "1"]'}, 1.0),
+            ({"closed": True, "clobTokenIds": json.dumps(["1", ASSET]), "outcomePrices": '["0.3", "0.7"]'}, None),
+        ]
+        for data, expected in cases:
+            with mock.patch("stop_review.requests.get", return_value=json_response(data)):
+                self.assertEqual(stop_review.fetch_payout("77", ASSET), expected)
+
+    def test_scan_once_reviews_alerts_even_when_bitcoin_data_fails(self):
+        ledger = pt.new_ledger(NOW)
+        del ledger["level_alerts"]  # a ledger from before the review existed
+        stop_review._pending.append({"key": "k", "kind": "stop_loss", "token_id": ASSET, "market_id": "77",
+                                     "name": "x", "best_bid": 0.3, "shares": 10.0, "sold_shares": 10.0,
+                                     "proceeds": 2.9})
+        pt._review_checked.clear()
+        with mock.patch("paper_trading.fetch_spot_and_vol", side_effect=ConnectionError("binance down")), \
+                mock.patch("paper_trading.stop_review.fetch_payout", return_value=1.0):
+            msgs, changed, error = pt.scan_once(ledger, NOW)
+        self.assertTrue(changed)
+        self.assertIn("binance down", error)
+        self.assertIn("جديد: مراجعة تنبيهات", msgs[0])
+        self.assertIn("الانتظار كان أفضل بـ $7.10", msgs[1])
+
+    def test_monitor_records_alerts_without_holding_up_the_alert(self):
+        pos = wallet_pos()
+        with mock.patch("polymarket_monitor.load_positions", return_value=([pos], "wallet", None)), \
+                mock.patch("polymarket_monitor.alerts.send_alert", return_value=True) as send, \
+                mock.patch("polymarket_monitor.stop_review.record", side_effect=RuntimeError("boom")) as rec:
+            next_alert_at = {}
+            monitor.check_once(next_alert_at)
+            monitor.check_once(next_alert_at)  # in cooldown: no alert, still offered to the review
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(rec.call_count, 2)
+        rec.assert_called_with(pos, "stop_loss", 28.0)
 
 
 if __name__ == "__main__":

@@ -463,7 +463,7 @@ def ensure_monitor():
     if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
         threading.Thread(target=start_telegram_commands, daemon=True).start()
     import paper_trading
-    if paper_trading.enabled():
+    if paper_trading.ledger_available():  # paper trading and the stop-alert review
         threading.Thread(target=start_paper_trading, daemon=True).start()
 
 
