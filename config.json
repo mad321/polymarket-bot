@@ -5,10 +5,8 @@
     "slug": "will-greece-win-their-uefa-nations-league-match",
     "shares": 44,
     "buy_price": 29,
-    "stop_loss": 18,
-    "take_profit": 75,
-    "closed": false,
-    "notes": "مشتري 44 سهم بـ $12.76"
+    "closed": true,
+    "notes": "مباراة منتهية — سعر الدخول 29¢ انتهت بخسارة"
   },
   {
     "id": "norway_win",
@@ -16,10 +14,8 @@
     "slug": "will-norway-win-their-uefa-nations-league-match",
     "shares": 23,
     "buy_price": 66,
-    "stop_loss": 45,
-    "take_profit": 88,
-    "closed": false,
-    "notes": "مشتري 23 سهم بـ $15.21"
+    "closed": true,
+    "notes": "مباراة منتهية"
   },
   {
     "id": "kazakhstan_win_1",
@@ -27,10 +23,8 @@
     "slug": "will-kazakhstan-win-their-uefa-nations-league-match",
     "shares": 46,
     "buy_price": 52,
-    "stop_loss": 30,
-    "take_profit": 85,
-    "closed": false,
-    "notes": "المركز الأول"
+    "closed": true,
+    "notes": "مباراة منتهية"
   },
   {
     "id": "kazakhstan_win_2",
@@ -38,10 +32,8 @@
     "slug": "will-kazakhstan-win-their-uefa-nations-league-match",
     "shares": 46,
     "buy_price": 52,
-    "stop_loss": 30,
-    "take_profit": 85,
-    "closed": false,
-    "notes": "المركز الثاني - تجاوز 5% لكل صفقة"
+    "closed": true,
+    "notes": "مباراة منتهية"
   },
   {
     "id": "slovakia_win",
@@ -49,9 +41,7 @@
     "slug": "will-slovakia-win-their-uefa-nations-league-match",
     "shares": 35,
     "buy_price": 70,
-    "stop_loss": 50,
-    "take_profit": 90,
-    "closed": false,
-    "notes": "مشتري بـ $24.38"
+    "closed": true,
+    "notes": "مباراة منتهية"
   }
 ]

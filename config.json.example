@@ -1,0 +1,22 @@
+[
+  {
+    "id": "scotland_win",
+    "name": "اسكتلندا تفوز",
+    "slug": "will-scotland-win-on-2026-11-13",
+    "shares": 45,
+    "buy_price": 57,
+    "match_start": "2026-11-13T20:45:00+00:00",
+    "closed": false,
+    "notes": "دخلنا بـ 57¢ → stop عند 42¢ → take profit عند 80¢+"
+  },
+  {
+    "id": "spain_win",
+    "name": "إسبانيا تفوز",
+    "slug": "will-spain-win-on-2026-11-14",
+    "shares": 35,
+    "buy_price": 68,
+    "match_start": "2026-11-14T21:00:00+00:00",
+    "closed": false,
+    "notes": "دخلنا بـ 68¢ → stop عند 53¢ → take profit عند 80¢+"
+  }
+]
