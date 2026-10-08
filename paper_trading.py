@@ -47,6 +47,7 @@ import pytz
 import requests
 
 import alerts
+import match_strategy
 import paper_store
 import stop_review
 
@@ -70,7 +71,8 @@ STAKE = _float_env("PAPER_STAKE", 10)
 MIN_EDGE = _float_env("PAPER_MIN_EDGE", 0.05)
 MIN_HOURS = 2           # no new trades in the last hours: quotes move faster than a 5-minute scan
 PRICE_RANGE = (0.05, 0.95)
-SCAN_INTERVAL = 300     # seconds
+SCAN_INTERVAL = 300     # seconds between Bitcoin scans
+LOOP_INTERVAL = 60      # the loop runs every minute for the live football test
 SNAPSHOT_HOURS = 24     # model-vs-market snapshot taken this long before expiry
 REVIEW_CHECK_EVERY = 3600  # seconds between resolution checks of one alert's market
 SUMMARY_WEEKDAY, SUMMARY_HOUR = 4, 18   # weekly summary: Friday 18:00, ALERT_TZ
@@ -103,6 +105,7 @@ STATE = {
 _lock = threading.Lock()
 _ledger = None
 _review_checked = {}  # market id -> last resolution check (epoch seconds)
+_last_bitcoin_scan = None
 
 
 def ledger_available():
@@ -426,7 +429,10 @@ def _results(trades):
 def summary_text(ledger, now, title):
     if not enabled():
         lines = [f"📒 {title}", "التداول على الورق متوقف (PAPER_TRADING=0)."]
-        return "\n".join(lines + (stop_review.summary_lines(ledger) or ["لا توجد تنبيهات مسجلة للمراجعة بعد."]))
+        lines += stop_review.summary_lines(ledger) or ["لا توجد تنبيهات مسجلة للمراجعة بعد."]
+        if "match_test" in ledger:
+            lines += match_strategy.summary_lines(ledger)
+        return "\n".join(lines)
     since = _parse_time(ledger["last_summary_at"])
     recent = [t for t in ledger["closed"] if _parse_time(t["closed_at"]) > since]
     lines = [
@@ -447,6 +453,8 @@ def summary_text(ledger, now, title):
         lines.append(f"أكبر فارق رآه النموذج: {best['edge'] * 100:.1f} نقطة "
                      f"({SIDES[best['side']]} في {best['name']})، والحد المطلوب للشراء {MIN_EDGE * 100:.0f} نقاط")
     lines += stop_review.summary_lines(ledger)
+    if "match_test" in ledger:
+        lines += match_strategy.summary_lines(ledger)
     lines.append("⚠️ الحكم يحتاج 4 أسابيع و30 صفقة محسومة على الأقل: نتيجة أسبوع واحد قد تكون حظاً.")
     return "\n".join(lines)
 
@@ -485,14 +493,20 @@ def scan_once(ledger, now=None):
     stop-loss / take-profit alerts. Returns (messages, changed, error).
     Network reads happen before the ledger lock; when the market data for
     paper trading cannot be read, the rest of the round still runs."""
+    global _last_bitcoin_scan
     now = now or datetime.now(timezone.utc)
-    paper = enabled()
+    paper = enabled() and (_last_bitcoin_scan is None or not 0 <= (now - _last_bitcoin_scan).total_seconds() < SCAN_INTERVAL)
+    if paper:
+        _last_bitcoin_scan = now
+    matches = match_strategy.enabled()
     with _lock:
         before = json.dumps(ledger, sort_keys=True)
         new_review = "level_alerts" not in ledger  # a ledger from before the review existed
+        new_matches = matches and "match_test" not in ledger
         stop_review.merge(ledger)
         due = due_market_ids(ledger, now) if paper else set()
         review = stop_review.open_entries(ledger)
+        match_plan = match_strategy.plan(ledger, now) if matches else None
     winners = {}
     for market_id in due:
         try:
@@ -503,6 +517,7 @@ def scan_once(ledger, now=None):
         if winner:
             winners[market_id] = winner
     payouts = _review_payouts(review, now)
+    match_data = match_strategy.fetch(match_plan, now) if matches else None
 
     data, error = None, None
     if paper:
@@ -518,7 +533,11 @@ def scan_once(ledger, now=None):
 
     with _lock:
         messages = [REVIEW_INTRO] if new_review else []
+        if new_matches:
+            messages.append(match_strategy.intro())
         messages += stop_review.settle(ledger, payouts, _iso(now))
+        if match_data:
+            messages += match_strategy.apply(ledger, match_data, now, TZ)
         if paper:
             messages += settle(ledger, winners, now)
             if data:
@@ -527,6 +546,8 @@ def scan_once(ledger, now=None):
             messages.append(summary_text(ledger, now, "ملخص الأسبوع للتداول على الورق"))
             ledger.update(summary_week=_week(now), last_summary_at=_iso(now), best_edge=None)
         changed = json.dumps(ledger, sort_keys=True) != before
+    if match_data and match_data["error"]:
+        error = "; ".join(filter(None, [error, f"football: {match_data['error']}"]))
     return messages, changed, error
 
 
@@ -578,4 +599,4 @@ def run_forever():
         except Exception as e:
             STATE["last_error"] = f"{type(e).__name__}: {e}"[:300]
             logger.error(f"[PAPER] {STATE['last_error']}")
-        time.sleep(SCAN_INTERVAL)
+        time.sleep(LOOP_INTERVAL)

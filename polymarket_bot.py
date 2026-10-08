@@ -411,6 +411,7 @@ def alerts_status():
     No secrets here."""
     import alerts
     import exposure
+    import match_strategy
     import paper_trading
     import telegram_actions
     import trading
@@ -422,6 +423,7 @@ def alerts_status():
         "trading": trading.status(),
         "paper_trading": paper_trading.STATE,
         "position_size": exposure.STATE,
+        "match_test": match_strategy.STATE,
     })
 
 
