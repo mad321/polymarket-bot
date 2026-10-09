@@ -1,3 +1,5 @@
+> ⚠️ **هذا الدليل يصف النسخة السابقة (Dual-AI Trading Arena).** التطبيق الذي يعمل الآن هو `polymarket_bot.py`، وطريقة تشغيله ونشره في [README.md](README.md). ملف `app.py` المذكور هنا لم يعد موجوداً.
+
 # 🏛️ Dual-AI Trading Arena
 
 نظام تداول متقدم يجلب بيانات حية من Polymarket ويحللها باستخدام Claude و Gemini.

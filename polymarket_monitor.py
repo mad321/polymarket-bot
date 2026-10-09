@@ -1,287 +1,215 @@
 """
-Polymarket Hybrid Stop-Loss Monitor — Telegram Alerts
-======================================================
-يراقب الصفقات المفتوحة كل 30 ثانية ويرسل تنبيه تيليجرام عند:
-  - الشرط A: السعر نزل 15¢ من سعر الدخول  (Price Stop-Loss)
-  - الشرط B: الدقيقة 65 من المباراة بدون هدف (Time Stop-Loss)
-  - الشرط C: السعر قفز فوق 80¢ (هدف سُجِّل → Take Profit)
+Polymarket Price Monitor
+========================
+Checks the open positions every 30 seconds (discovered from the wallet, see
+positions.py) and sends an alert when a price reaches its stop-loss or
+take-profit. It never places orders itself: alerts for the bot's own wallet
+carry a sell button, and a sale happens only when you confirm it in Telegram
+(telegram_actions.py, trading.py).
 
-متغيرات البيئة المطلوبة:
-  TELEGRAM_BOT_TOKEN  — توكن البوت من @BotFather
-  TELEGRAM_CHAT_ID    — رقم المحادثة (احصل عليه من @userinfobot)
+Alerts go to every channel configured in alerts.py (Telegram and/or WhatsApp).
+Runs as a background thread of the web app (polymarket_bot.py); its state is
+served at /api/alerts/status.
+
+Optional settings:
+  ALERT_COOLDOWN  seconds before re-alerting the same position (default 3600)
+  STARTUP_ALERT   "0" to skip the "monitor started" message
+  ALERT_TZ        time zone for alert timestamps (default Asia/Riyadh)
+
+Every 10 minutes it also checks position sizes against the capital
+(exposure.py, EXPOSURE_ALERT_PCT).
 """
 
 import os
-import json
 import time
-import requests
+import logging
 from datetime import datetime, timezone
 
-# ─── CONFIG ────────────────────────────────────────────────────────────────────
+import pytz
+import requests
 
-POLYMARKET_API  = "https://clob.polymarket.com"
-GAMMA_API       = "https://gamma-api.polymarket.com"
+import alerts
+import exposure
+import stop_review
+import trading
+import telegram_actions
+from positions import get_price_by_slug, load_positions
 
-TELEGRAM_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT   = os.environ.get("TELEGRAM_CHAT_ID", "")
+logger = logging.getLogger(__name__)
 
-CONFIG_FILE     = "config.json"
-CHECK_INTERVAL  = 30     # ثانية بين كل فحص
-ALERT_COOLDOWN  = 120    # ثانية قبل إعادة إرسال نفس التنبيه
+# ─── CONFIG ──────────────────────────────────────────────────────────────────
 
-# ─── Hybrid Stop-Loss Constants ────────────────────────────────────────────────
+POLYMARKET_API = "https://clob.polymarket.com"
 
-PRICE_STOP_DROP    = 15    # ¢ — اخرج إذا نزل السعر هذا القدر من الدخول
-TIME_STOP_MINUTE   = 65    # دقيقة — اخرج بعد هذا الوقت بدون هدف
-GOAL_PRICE_SPIKE   = 80    # ¢ — إذا وصل السعر هذا → هدف → اخرج بربح
-MIN_LIQUIDITY      = 3000  # $ — حد أدنى للسيولة في السوق
+CHECK_INTERVAL = 30          # seconds between price checks
+RETRY_AFTER_FAILURE = 300    # seconds before retrying an alert no channel accepted
+ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN", 3600))
 
-# ─── TELEGRAM ──────────────────────────────────────────────────────────────────
+try:
+    ALERT_TZ = pytz.timezone(os.environ.get("ALERT_TZ", "Asia/Riyadh"))
+except pytz.UnknownTimeZoneError:
+    ALERT_TZ = pytz.utc
 
-def send_telegram(message: str) -> bool:
-    """ترسل رسالة نصية عبر Telegram Bot API."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        print(f"[TELEGRAM NOT CONFIGURED] {message}")
-        return False
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT,
-        "text": message,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-    try:
-        r = requests.post(url, json=payload, timeout=10)
-        r.raise_for_status()
-        print(f"[TELEGRAM ✓] {message[:60]}...")
-        return True
-    except Exception as e:
-        print(f"[TELEGRAM ERROR] {e}")
-        return False
+# Read by /api/alerts/status.
+STATE = {
+    "running": False,
+    "started_at": None,
+    "last_check_at": None,
+    "positions": 0,
+    "past_level": 0,
+    "source": None,
+    "error": None,
+    "alert_cooldown_seconds": ALERT_COOLDOWN,
+}
 
-# ─── PRICE FETCHING ────────────────────────────────────────────────────────────
+STARTUP_MESSAGE = (
+    "✅ مراقب بوليماركت بدأ العمل.\n"
+    "ستصلك هنا التنبيهات عند وصول أي صفقة لوقف الخسارة أو الهدف."
+)
 
-def get_price_by_slug(slug: str) -> float | None:
-    """جلب السعر الحالي للسوق عبر slug."""
-    try:
-        r = requests.get(f"{GAMMA_API}/markets?slug={slug}", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        if not data:
-            return None
-        prices = data[0].get("outcomePrices", [])
-        if isinstance(prices, str):
-            prices = json.loads(prices)
-        if prices:
-            return round(float(prices[0]) * 100, 1)
-    except Exception as e:
-        print(f"[PRICE ERROR] {slug}: {e}")
-    return None
+# ─── HELPERS ─────────────────────────────────────────────────────────────────
+
+def _utc_now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
 
 def get_price_by_token_id(token_id: str) -> float | None:
-    """جلب السعر مباشرة عبر token_id."""
+    """Current sell price (cents) for a CLOB token ID, or None on error."""
     try:
-        r = requests.get(
-            f"{POLYMARKET_API}/price?token_id={token_id}&side=sell",
-            timeout=10
-        )
+        url = f"{POLYMARKET_API}/price?token_id={token_id}&side=sell"
+        r = requests.get(url, timeout=10)
         r.raise_for_status()
         price = r.json().get("price")
         if price is not None:
             return round(float(price) * 100, 1)
     except Exception as e:
-        print(f"[PRICE ERROR] token {token_id[:12]}...: {e}")
+        logger.error(f"Error fetching token {token_id[:12]}...: {e}")
     return None
 
+
 def get_price(position: dict) -> float | None:
-    """اختار طريقة الجلب حسب الحقول المتوفرة في config."""
+    """Fallback when the wallet did not report a current price."""
     if "token_id" in position:
         return get_price_by_token_id(position["token_id"])
-    elif "slug" in position:
+    if position.get("slug"):
         return get_price_by_slug(position["slug"])
     return None
 
-# ─── MATCH TIME ────────────────────────────────────────────────────────────────
 
-def get_match_minute(position: dict) -> int | None:
-    """
-    احسب دقيقة المباراة من وقت الانطلاق المخزن في config.
-    يتوقع حقل 'match_start' بصيغة ISO 8601: "2026-10-07T20:00:00+03:00"
-    يعيد None إذا لم يكن الحقل موجوداً.
-    """
-    start_str = position.get("match_start")
-    if not start_str:
-        return None
-    try:
-        start = datetime.fromisoformat(start_str)
-        # تأكد أن كلاهما aware
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        elapsed = (now - start).total_seconds()
-        # لو المباراة لم تبدأ بعد
-        if elapsed < 0:
-            return None
-        # أوقاف وعروض (45 دق + إضافي) → نضيف 10 دقائق للشوط الأول
-        minute = int(elapsed / 60)
-        return minute
-    except Exception as e:
-        print(f"[TIME ERROR] {e}")
-        return None
-
-# ─── ALERT FORMATTING ──────────────────────────────────────────────────────────
-
-def format_alert(pos: dict, price: float, reason: str, minute: int | None = None) -> str:
-    """صيغة رسالة التنبيه بالعربي."""
-
-    time_str = datetime.now().strftime("%H:%M")
-    name     = pos.get("name", "—")
-    entry    = pos.get("buy_price", "—")
-    shares   = pos.get("shares", "—")
-    slug     = pos.get("slug", "")
-    link     = f"https://polymarket.com/event/{slug}" if slug else ""
-
-    # حساب الربح/الخسارة التقريبي
-    try:
-        pnl_pct = round((price - float(entry)) / float(entry) * 100, 1)
-        pnl_sign = "+" if pnl_pct >= 0 else ""
-        pnl_str = f"{pnl_sign}{pnl_pct}%"
-    except Exception:
-        pnl_str = "—"
-
-    if reason == "price_stop":
-        header  = "🔴 <b>وقف خسارة — انخفاض السعر</b>"
-        action  = "بيع فوري"
-        detail  = f"السعر نزل {PRICE_STOP_DROP}¢ من الدخول"
-    elif reason == "time_stop":
-        header  = "⏰ <b>وقف خسارة — انقضى الوقت</b>"
-        action  = "بيع فوري"
-        detail  = f"الدقيقة {minute} — لا يوجد هدف"
-    elif reason == "take_profit":
-        header  = "🟢 <b>أخذ الأرباح — هدف سُجِّل</b>"
-        action  = "بيع فوري"
-        detail  = f"السعر قفز فوق {GOAL_PRICE_SPIKE}¢"
-    else:
-        header  = "⚠️ تنبيه"
-        action  = "راجع الصفقة"
-        detail  = reason
-
-    msg = (
-        f"{header}\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"🏟️  <b>{name}</b>\n"
-        f"💰 السعر الحالي: <b>{price}¢</b>\n"
-        f"📥 سعر الدخول:  {entry}¢\n"
-        f"📊 الأداء:       {pnl_str}\n"
-        f"🎯 الأسهم:       {shares}\n"
-        f"⚡ الإجراء:      <b>{action}</b>\n"
-        f"📌 السبب:        {detail}\n"
-        f"🕐 الوقت:        {time_str}\n"
-        f"━━━━━━━━━━━━━━━━━"
-    )
-    if link:
-        msg += f"\n🔗 <a href=\"{link}\">فتح الصفقة</a>"
-    return msg
-
-# ─── STATE TRACKING ────────────────────────────────────────────────────────────
-
-# يتتبع الصفقات التي أُرسل لها تنبيه مسبقاً حتى لا نُغرق الشات
-_alerted: dict[str, dict] = {}
-# { position_id: { "reason": str, "timestamp": float } }
-
-def should_alert(pid: str, reason: str) -> bool:
-    """هل يجب إرسال التنبيه؟ (تجنب التكرار خلال ALERT_COOLDOWN)."""
-    now = time.time()
-    prev = _alerted.get(pid)
-    if prev and prev["reason"] == reason and (now - prev["timestamp"]) < ALERT_COOLDOWN:
-        return False
-    return True
-
-def mark_alerted(pid: str, reason: str):
-    _alerted[pid] = {"reason": reason, "timestamp": time.time()}
-
-# ─── CORE LOGIC ────────────────────────────────────────────────────────────────
-
-def check_hybrid_stoploss(pos: dict, price: float) -> str | None:
-    """
-    يطبق Hybrid Stop-Loss ويعيد سبب الخروج أو None إذا لم يتحقق شيء.
-    الأولوية: Take Profit > Price Stop > Time Stop
-    """
-    entry = float(pos.get("buy_price", 0))
-
-    # ── الشرط C: Take Profit (هدف مُسجَّل) ────────────────────────────────
-    if price >= GOAL_PRICE_SPIKE:
+def level_hit(position: dict, price: float) -> str | None:
+    """"stop_loss" or "take_profit" when the price is at or past that level."""
+    stop, tp = position.get("stop_loss"), position.get("take_profit")
+    if stop and price <= stop:
+        return "stop_loss"
+    if tp and price >= tp:
         return "take_profit"
-
-    # ── الشرط A: Price-Based Stop ────────────────────────────────────────
-    if entry and price <= (entry - PRICE_STOP_DROP):
-        return "price_stop"
-
-    # ── الشرط B: Time-Based Stop ─────────────────────────────────────────
-    minute = get_match_minute(pos)
-    if minute is not None and minute >= TIME_STOP_MINUTE:
-        # لو وصل السعر أصلاً فوق 80¢ في مرحلة ما، ربما سقط لاحقاً
-        # لكن إذا السعر أقل من 80¢ الآن والوقت انتهى → اخرج
-        if price < GOAL_PRICE_SPIKE:
-            return "time_stop"
-
     return None
 
-# ─── MAIN LOOP ─────────────────────────────────────────────────────────────────
 
-def load_config():
-    with open(CONFIG_FILE, "r") as f:
-        return json.load(f)
+def _signed_usd(value: float) -> str:
+    # The left-to-right mark keeps the sign before the number in RTL messages.
+    value = round(value, 2)
+    return f"‎{'-' if value < 0 else '+'}${abs(value):.2f}"
 
-def main():
-    print("=" * 55)
-    print("Polymarket Hybrid Monitor — Telegram Alerts")
-    print(f"فحص كل {CHECK_INTERVAL}s | Price Stop: {PRICE_STOP_DROP}¢ | Time Stop: د{TIME_STOP_MINUTE}")
-    print("=" * 55)
 
-    # تنبيه افتتاحي
-    send_telegram(
-        "✅ <b>البوت شغّال</b>\n"
-        f"🔴 Price Stop: -{PRICE_STOP_DROP}¢ من الدخول\n"
-        f"⏰ Time Stop:  الدقيقة {TIME_STOP_MINUTE} بدون هدف\n"
-        f"🟢 Take Profit: {GOAL_PRICE_SPIKE}¢+"
-    )
+def _in_trading_wallet(pos: dict) -> bool:
+    wallet = trading.trading_wallet()
+    return bool(wallet) and pos.get("wallet") == wallet
 
-    while True:
-        try:
-            positions = load_config()
-        except FileNotFoundError:
-            print("[ERROR] config.json غير موجود!")
-            time.sleep(60)
+
+def format_alert(pos: dict, price: float, reason: str) -> str:
+    """Alert message in Arabic."""
+    hit_stop = reason == "stop_loss"
+    level = pos["stop_loss"] if hit_stop else pos["take_profit"]
+    lines = [
+        "🔴 تنبيه بوليماركت: وقف الخسارة" if hit_stop else "🟢 تنبيه بوليماركت: وصل للهدف",
+        f"الصفقة: {pos['name']}",
+        f"السعر الحالي: {price}¢ (الحد: {level}¢)",
+        f"الإجراء: {'بيع فوري - وقف الخسارة' if hit_stop else 'خذ الأرباح'}",
+        f"الأسهم: {pos['shares']}",
+    ]
+    if _in_trading_wallet(pos):
+        lines.append("المحفظة: محفظة البوت")
+    if pos.get("pnl_usd") is not None:
+        lines.append(f"الربح / الخسارة: {_signed_usd(pos['pnl_usd'])}")
+    if pos.get("url"):
+        lines.append(pos["url"])
+    lines.append(f"الوقت: {datetime.now(ALERT_TZ):%H:%M}")
+    return "\n".join(lines)
+
+# ─── MAIN LOOP ────────────────────────────────────────────────────────────────
+
+def check_once(next_alert_at: dict[str, float]) -> None:
+    """One pass over the positions; sends the alerts that are due."""
+    positions, source, error = load_positions()
+    now = time.time()
+    past_level = 0
+
+    for pos in positions:
+        price = pos.get("current_price")
+        if price is None:
+            price = get_price(pos)
+        if price is None:
+            logger.warning(f"{pos['name']}: could not fetch price")
             continue
 
-        active = [p for p in positions if not p.get("closed", False)]
-        ts = datetime.now().strftime("%H:%M:%S")
-        print(f"\n[{ts}] فحص {len(active)} صفقة...")
+        reason = level_hit(pos, price)
+        if not reason:
+            continue
+        past_level += 1
 
-        for pos in active:
-            pid   = pos.get("id", pos.get("name", "unknown"))
-            price = get_price(pos)
+        # Per wallet: the same market held in two wallets alerts for each.
+        pid = f"{pos.get('wallet', '')}:{pos.get('id') or pos.get('name', 'unknown')}"
+        if now >= next_alert_at.get(pid, 0):
+            # Positions of the bot's own wallet get a sell button (Telegram only).
+            buttons = (telegram_actions.sell_button(pos["id"])
+                       if trading.enabled() and _in_trading_wallet(pos) else None)
+            sent = alerts.send_alert(format_alert(pos, price, reason), buttons)
+            next_alert_at[pid] = now + (ALERT_COOLDOWN if sent else RETRY_AFTER_FAILURE)
+            logger.info(f"{reason} alert for {pos['name']} at {price}¢: "
+                        f"{'sent' if sent else 'not sent'}")
+        try:
+            stop_review.record(pos, reason, price)  # once per position and level
+        except Exception:
+            logger.exception(f"Recording the {reason} alert of {pos['name']} for review failed")
 
-            if price is None:
-                print(f"  ⚠️  {pos.get('name')}: تعذر جلب السعر")
-                continue
+    if source == "wallet":
+        try:
+            exposure.check(positions, alerts.send_alert)  # every 10 minutes
+        except Exception:
+            logger.exception("Position size check failed")
 
-            entry  = pos.get("buy_price", "—")
-            minute = get_match_minute(pos)
-            min_str = f"د{minute}" if minute is not None else "—"
-            print(f"  {pos.get('name')}: {price}¢  (دخول:{entry}¢ | {min_str})")
+    STATE.update(last_check_at=_utc_now(), positions=len(positions),
+                 past_level=past_level, source=source, error=error)
+    logger.info(f"Checked {len(positions)} position(s) from {source}, "
+                f"{past_level} at or past a level"
+                + (f" (wallet error: {error})" if error else ""))
 
-            # ── تطبيق Hybrid Stop-Loss ──────────────────────────────────
-            reason = check_hybrid_stoploss(pos, price)
 
-            if reason and should_alert(pid, reason):
-                msg = format_alert(pos, price, reason, minute)
-                if send_telegram(msg):
-                    mark_alerted(pid, reason)
+def main():
+    channels = alerts.configured_channels()
+    logger.info(f"Polymarket monitor starting: every {CHECK_INTERVAL}s, "
+                f"cooldown {ALERT_COOLDOWN}s, channels: {', '.join(channels) or 'none'}")
+    STATE.update(running=True, started_at=_utc_now())
+    exposure.ACTIVE = True
 
-        time.sleep(CHECK_INTERVAL)
+    if os.environ.get("STARTUP_ALERT", "1") != "0":
+        alerts.send_alert(STARTUP_MESSAGE)
+
+    next_alert_at: dict[str, float] = {}   # position id → earliest next alert
+    try:
+        while True:
+            try:
+                check_once(next_alert_at)
+            except Exception as e:
+                # Keep the thread alive: one bad pass must not end the monitoring.
+                STATE["error"] = str(e)
+                logger.exception("Monitor check failed")
+            time.sleep(CHECK_INTERVAL)
+    finally:
+        STATE["running"] = False
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

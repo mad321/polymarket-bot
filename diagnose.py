@@ -112,7 +112,10 @@ print("\n\n6️⃣  فحص Flask والتطبيق:")
 print("-" * 70)
 
 try:
-    from app import app
+    # Importing the app must not start its monitor and Telegram threads:
+    # a second Telegram poller would take the live bot's commands and taps.
+    os.environ["ENABLE_MONITOR"] = "0"
+    from polymarket_bot import app
     print(f"   ✅ تطبيق Flask يُحمّل بنجاح")
 
     # اختبار الطلب
@@ -152,7 +155,7 @@ print("="*70)
 print("""
 ✅ إذا مرّت جميع الاختبارات:
    → الكود جاهز للتشغيل
-   → استخدم: python app.py
+   → استخدم: python polymarket_bot.py
    → افتح: http://localhost:5000
 
 ❌ إذا فشل أي اختبار:

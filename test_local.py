@@ -3,8 +3,14 @@
 اختبار محلي للتطبيق بدون الحاجة للاتصال بالإنترنت
 """
 
+import os
 import sys
 import json
+from datetime import datetime, timedelta, timezone
+
+# Importing polymarket_bot below must not start its monitor and Telegram
+# threads: a second Telegram poller would take the live bot's commands and taps.
+os.environ["ENABLE_MONITOR"] = "0"
 
 print("\n" + "="*70)
 print("✅ اختبار محلي لنظام التداول")
@@ -71,7 +77,8 @@ try:
         "id": "test-123",
         "slug": "bitcoin-daily",
         "question": "هل سيتجاوز البيتكوين 115,000 دولار؟",
-        "endDate": "2026-09-25T12:00:00Z",
+        # Two days ahead, so the time-remaining check does not expire with the calendar
+        "endDate": (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "closed": False,
         "outcomes": [
             {"label": "Yes", "price": 0.65, "liquidity": 4000},
@@ -153,10 +160,10 @@ try:
         if response.status_code == 200:
             html = response.get_data(as_text=True)
             checks = [
-                ("الواجهة العربية", "حلبة الذكاء الاصطناعي" in html),
-                ("عنوان الصفحة", "Dual-AI Trading Arena" in html),
+                ("الواجهة العربية", 'dir="rtl"' in html),
+                ("عنوان الصفحة", "مراقب صفقات بوليماركت" in html),
                 ("الأسلوب", "background: linear-gradient" in html),
-                ("الأزرار", "تحديث البيانات" in html),
+                ("الأزرار", "تحديث الأسعار" in html),
             ]
 
             for check_name, check_result in checks:
