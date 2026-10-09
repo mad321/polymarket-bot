@@ -30,6 +30,7 @@ import requests
 
 import alerts
 import exposure
+import match_strategy
 import stop_review
 import trading
 import telegram_actions
@@ -146,6 +147,8 @@ def check_once(next_alert_at: dict[str, float]) -> None:
     past_level = 0
 
     for pos in positions:
+        if match_strategy.covers(pos):
+            continue  # football win positions get the hybrid stop-loss alerts instead (match_strategy.py)
         price = pos.get("current_price")
         if price is None:
             price = get_price(pos)

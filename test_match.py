@@ -70,7 +70,7 @@ class StrategyTests(unittest.TestCase):
         self.ledger = pt.new_ledger(KICKOFF - timedelta(days=1))
         self.sec = ms.section(self.ledger)
         ms._counted_skips.clear()
-        patcher = mock.patch.dict(os.environ, {"MATCH_STAKE": "10"})
+        patcher = mock.patch.dict(os.environ, {"MATCH_STAKE": "10", "MATCH_TEST": "1", "MATCH_ALERTS": "0"})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -188,6 +188,9 @@ class FetchTests(unittest.TestCase):
         ms._schedule, ms._schedule_at = {}, None
         ms._settle_checked.clear()
         self.addCleanup(setattr, ms, "_schedule", {})
+        patcher = mock.patch.dict(os.environ, {"MATCH_TEST": "1", "MATCH_ALERTS": "0"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_fetch_picks_entry_candidates_and_live_games(self):
         g = game()
@@ -228,7 +231,7 @@ class FetchTests(unittest.TestCase):
     def test_scan_once_runs_the_match_test_and_announces_it_once(self):
         ledger = pt.new_ledger(KICKOFF)
         empty = {"games": {}, "books": {}, "payouts": {}, "candidates": [], "started": [], "error": None}
-        with mock.patch.dict(os.environ, {"MATCH_TEST": "1", "PAPER_TRADING": "0"}), \
+        with mock.patch.dict(os.environ, {"MATCH_TEST": "1", "MATCH_ALERTS": "0", "PAPER_TRADING": "0"}), \
                 mock.patch("paper_trading.match_strategy.fetch", return_value=empty):
             msgs, changed, error = pt.scan_once(ledger, KICKOFF)
             msgs2, _, _ = pt.scan_once(ledger, KICKOFF + timedelta(minutes=1))
@@ -236,6 +239,133 @@ class FetchTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(msgs2, [])
         self.assertIn("match_test", ledger)
+
+
+# ─── ALERTS ON YOUR POSITIONS ───────────────────────────────────────────────
+
+MAIN = "0x0c4526398bba16e31f23ca818d767cb00b02921c"
+BOT = "0xb0b0000000000000000000000000000000000001"
+
+
+def my_pos(token="yH", wallet=MAIN, outcome="Yes", title="Will Chelsea FC win on 2026-10-10?",
+           event="epl-che-bou-2026-10-10", buy=57.0, shares=44.0):
+    return {"id": token, "wallet": wallet, "outcome": outcome, "title": title, "event": event,
+            "name": f"{title} — {outcome}", "buy_price": buy, "shares": shares, "current_price": buy,
+            "url": f"https://polymarket.com/event/{event}", "stop_loss": 40.0, "take_profit": 85.0}
+
+
+class PositionAlertTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, {"MATCH_ALERTS": "1", "MATCH_TEST": "0",
+                                               "TRADING_WALLET": BOT, "TRADING_ENABLED": "1"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.ledger = pt.new_ledger(KICKOFF)
+        ms._schedule = {"epl-che-bou-2026-10-10": game()}
+        self.addCleanup(setattr, ms, "_schedule", {})
+        ms.STATE["alerts_sent"] = 0
+
+    def run_tick(self, pos, minutes, bid, ask, **state):
+        g = game(live=True, **state)
+        p = {**pos, "_game": g, "_side": "home"}
+        data = {"games": {g["slug"]: g}, "books": {"yH": book(bid, ask, size=30)}, "positions": [p],
+                "candidates": [], "started": [], "payouts": {}, "error": None}
+        return ms.apply(self.ledger, data, KICKOFF + timedelta(minutes=minutes), TZ)
+
+    def test_covers_only_team_win_yes_in_the_chosen_leagues(self):
+        self.assertTrue(ms.covers(my_pos()))
+        self.assertFalse(ms.covers(my_pos(outcome="No")))
+        self.assertFalse(ms.covers(my_pos(title="Will Chelsea FC vs. AFC Bournemouth end in a draw?")))
+        self.assertFalse(ms.covers(my_pos(event="mls-lag-sea-2026-10-10")))
+        self.assertFalse(ms.covers(my_pos(title="Saudi Arabia military action against Yemen on September 21?",
+                                          event="saudi-arabia-military-action-against-yemen-on-20260916")))
+        with mock.patch.dict(os.environ, {"MATCH_ALERTS": "0"}):
+            self.assertFalse(ms.covers(my_pos()))
+
+    def test_positions_are_read_only_while_a_game_is_under_way(self):
+        with mock.patch("match_strategy.positions_module.load_positions",
+                        return_value=([my_pos(), my_pos(token="other")], "wallet", None)) as load:
+            self.assertEqual(ms._positions_in_play(KICKOFF - timedelta(minutes=5)), [])
+            load.assert_not_called()
+            found = ms._positions_in_play(KICKOFF + timedelta(minutes=20))
+        self.assertEqual([(p["id"], p["_side"], p["_game"]["slug"]) for p in found],
+                         [("yH", "home", "epl-che-bou-2026-10-10")])
+
+    def test_intro_once_then_each_rule_once_per_position(self):
+        msgs = self.run_tick(my_pos(), 10, 0.55, 0.57, score="0-0", elapsed="10", period="1H")
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("تنبيهات الوقف المختلط تعمل الآن", msgs[0])
+        msgs = self.run_tick(my_pos(), 30, 0.41, 0.43, score="0-1", elapsed="30", period="1H")  # 42 <= 57 - 15
+        self.assertEqual(len(msgs), 1)
+        text = msgs[0]
+        self.assertIn("🔴 الوقف المختلط: السعر نزل 15¢ عن سعر شرائك", text)
+        self.assertIn("Chelsea FC vs. AFC Bournemouth: 0-1 (الدقيقة 30)", text)
+        self.assertIn("سعر شرائك 57¢، والسعر الآن 42.0¢", text)
+        self.assertIn("بيع 30 سهم الآن", text)
+        self.assertIn("لا مشترين لباقي الأسهم (14)", text)
+        self.assertIn("المحفظة الرئيسية", text)
+        self.assertIn("https://polymarket.com/event/epl-che-bou-2026-10-10", text)
+        self.assertEqual(self.run_tick(my_pos(), 31, 0.40, 0.42, score="0-1", elapsed="31", period="1H"), [])
+        msgs = self.run_tick(my_pos(), 50, 0.75, 0.77, score="1-1", elapsed="50", period="2H")
+        self.assertIn("🟢 الوقف المختلط: Chelsea FC سجّل", msgs[0])
+        self.assertEqual(ms.STATE["alerts_sent"], 2)
+
+    def test_time_stop_alert(self):
+        self.run_tick(my_pos(), 10, 0.55, 0.57, score="0-0", elapsed="10", period="1H")
+        msgs = self.run_tick(my_pos(), 80, 0.45, 0.47, score="0-0", elapsed="66", period="2H")
+        self.assertIn("⏰ الوقف المختلط: الدقيقة 66 ولم يسجّل Chelsea FC", msgs[0])
+
+    def test_bot_wallet_alert_comes_with_the_sell_button(self):
+        self.run_tick(my_pos(), 10, 0.55, 0.57, score="0-0", elapsed="10", period="1H")
+        msgs = self.run_tick(my_pos(wallet=BOT), 30, 0.41, 0.43, score="0-1", elapsed="30", period="1H")
+        text, markup = msgs[0]
+        self.assertIn("محفظة البوت", text)
+        self.assertEqual(markup["inline_keyboard"][0][0]["text"], "🔴 بيع الآن")
+
+    def test_monitor_skips_generic_levels_for_covered_positions(self):
+        import polymarket_monitor as monitor
+        covered = my_pos(buy=72.0)
+        covered["current_price"] = 30.0          # far below its 40¢ generic stop
+        other = my_pos(token="y2", outcome="No", title="Saudi Arabia military action?", event="saudi-x")
+        other.update(current_price=30.0, stop_loss=40.0)
+        with mock.patch("polymarket_monitor.load_positions", return_value=([covered, other], "wallet", None)), \
+                mock.patch("polymarket_monitor.alerts.send_alert", return_value=True) as send, \
+                mock.patch("polymarket_monitor.stop_review.record"), \
+                mock.patch("polymarket_monitor.exposure.check"):
+            monitor.check_once({})
+        self.assertEqual(send.call_count, 1)
+        self.assertIn("Saudi Arabia military action?", send.call_args.args[0])
+
+    def test_fetch_reads_the_games_and_books_of_your_positions(self):
+        ms._schedule_at = KICKOFF + timedelta(minutes=20)  # fresh: no schedule read
+        live = game(live=True, score="0-0", elapsed="20", period="1H")
+        with mock.patch("match_strategy.positions_module.load_positions",
+                        return_value=([my_pos()], "wallet", None)), \
+                mock.patch("match_strategy.fetch_game", return_value=live) as fetch_game, \
+                mock.patch("match_strategy.fetch_books", return_value={"yH": book(0.5, 0.52)}) as books:
+            data = ms.fetch({"live": {}, "settle": [], "entered": set()}, KICKOFF + timedelta(minutes=20))
+        fetch_game.assert_called_once_with("epl-che-bou-2026-10-10", "epl")
+        self.assertIn("yH", books.call_args.args[0])
+        self.assertEqual(len(data["positions"]), 1)
+
+    def test_run_forever_sends_buttons_with_the_text(self):
+        store = mock.Mock(describe=lambda: "mock")
+        store.load.return_value = pt.new_ledger(KICKOFF)
+
+        class Stop(BaseException):
+            pass
+        pt._ledger = None
+        self.addCleanup(setattr, pt, "_ledger", None)
+        import stop_review
+        self.addCleanup(setattr, stop_review, "ACTIVE", False)
+        with mock.patch("paper_trading.paper_store.default_store", return_value=store), \
+                mock.patch("paper_trading.time.sleep", side_effect=Stop), \
+                mock.patch("paper_trading.scan_once", return_value=([("نص", {"k": 1}), "عادي"], False, None)), \
+                mock.patch("paper_trading.alerts.send_alert") as send:
+            with self.assertRaises(Stop):
+                pt.run_forever()
+        self.assertEqual(send.call_args_list[0].args, ("نص", {"k": 1}))
+        self.assertEqual(send.call_args_list[1].args, ("عادي",))
 
 
 if __name__ == "__main__":
