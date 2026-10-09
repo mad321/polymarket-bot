@@ -498,11 +498,11 @@ def scan_once(ledger, now=None):
     paper = enabled() and (_last_bitcoin_scan is None or not 0 <= (now - _last_bitcoin_scan).total_seconds() < SCAN_INTERVAL)
     if paper:
         _last_bitcoin_scan = now
-    matches = match_strategy.enabled()
+    matches = match_strategy.active()
     with _lock:
         before = json.dumps(ledger, sort_keys=True)
         new_review = "level_alerts" not in ledger  # a ledger from before the review existed
-        new_matches = matches and "match_test" not in ledger
+        new_matches = match_strategy.enabled() and "match_test" not in ledger
         stop_review.merge(ledger)
         due = due_market_ids(ledger, now) if paper else set()
         review = stop_review.open_entries(ledger)
@@ -588,8 +588,8 @@ def run_forever():
                 STATE.update(loaded=True, open_trades=len(ledger["open"]))
             messages, changed, error = scan_once(_ledger)
             dirty = dirty or changed
-            for text in messages:
-                alerts.send_alert(text)
+            for message in messages:  # text, or (text, buttons)
+                alerts.send_alert(*message) if isinstance(message, tuple) else alerts.send_alert(message)
             if dirty:
                 with _lock:
                     snapshot = json.loads(json.dumps(_ledger))

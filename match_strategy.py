@@ -22,8 +22,16 @@ Live score, minute and period come from Polymarket's own event data. Nothing
 here places orders; results go to Telegram (a morning digest, /paper and the
 Friday summary) and live in the pinned ledger, like paper_trading.py.
 
+Alerts on your own positions: the same three rules are applied to every
+"Will <team> win?" Yes position of the watched wallets in these leagues, with
+your average buy price as the entry. Each rule alerts once per position, with
+what selling every share would pay right then; positions of the bot wallet
+get the sell button. These positions skip the monitor's generic stop-loss /
+take-profit alerts (polymarket_monitor.py), which would contradict them.
+
 Settings:
   MATCH_TEST=0    turn the test off
+  MATCH_ALERTS=0  turn the alerts on your positions off
   MATCH_LEAGUES   Polymarket league codes (default: unl,spl,ucl,epl,lal,bun,sea)
   MATCH_STAKE     virtual dollars per match (default 10)
 """
@@ -35,6 +43,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+import positions as positions_module
 import stop_review
 
 logger = logging.getLogger(__name__)
@@ -61,7 +70,8 @@ DIGEST_HOUR = 9  # morning digest, ALERT_TZ
 RULES = {"price": "السعر نزل 15¢", "time": "الدقيقة 65 بلا هدف", "goal": "هدف للفريق"}
 FINISHED = ("FT", "VFT", "AET", "PEN", "FINISHED", "ENDED")
 
-STATE = {"leagues": None, "games_scheduled": 0, "open": 0, "last_scan_at": None, "error": None}
+STATE = {"leagues": None, "games_scheduled": 0, "open": 0, "last_scan_at": None, "error": None,
+         "positions_in_play": 0, "alerts_sent": 0}
 
 _schedule = {}            # slug -> game, refreshed every SCHEDULE_EVERY
 _schedule_at = None
@@ -70,7 +80,28 @@ _counted_skips = set()    # games that started without a team in the entry range
 
 
 def enabled():
+    """The shadow test."""
     return (os.environ.get("MATCH_TEST") or "").strip() != "0"
+
+
+def alerts_enabled():
+    """The alerts on your own positions."""
+    return (os.environ.get("MATCH_ALERTS") or "").strip() != "0"
+
+
+def active():
+    return enabled() or alerts_enabled()
+
+
+def covers(pos):
+    """True for the positions the hybrid alerts handle: Yes on "Will <team> win?"
+    in one of the chosen leagues (a draw or a No position is not covered)."""
+    if not alerts_enabled():
+        return False
+    league = str(pos.get("event") or "").split("-")[0]
+    title = str(pos.get("title") or "")
+    return (league in leagues() and str(pos.get("outcome") or "").lower() == "yes"
+            and title.startswith("Will ") and " win " in title)
 
 
 def stake():
@@ -228,23 +259,27 @@ def plan(ledger, now):
 def fetch(plan_, now):
     """Network reads for one round, outside the ledger lock."""
     global _schedule, _schedule_at
-    data = {"games": {}, "books": {}, "payouts": {}, "candidates": [], "error": None}
+    data = {"games": {}, "books": {}, "payouts": {}, "candidates": [], "positions": [], "error": None}
     try:
         if _schedule_at is None or now - _schedule_at >= SCHEDULE_EVERY:
             _schedule, _schedule_at = fetch_schedule(now), now
-        candidates = [g for g in _schedule.values()
-                      if g["slug"] not in plan_["entered"] and g["start"] - ENTRY_WINDOW <= now < g["start"]]
+        candidates = [g for g in _schedule.values() if enabled()
+                      and g["slug"] not in plan_["entered"] and g["start"] - ENTRY_WINDOW <= now < g["start"]]
         data["candidates"] = [g["slug"] for g in candidates]
-        data["started"] = [g["slug"] for g in _schedule.values()
-                           if g["slug"] not in plan_["entered"] and now - ENTRY_WINDOW <= g["start"] <= now]
+        data["started"] = [g["slug"] for g in _schedule.values() if enabled()
+                           and g["slug"] not in plan_["entered"] and now - ENTRY_WINDOW <= g["start"] <= now]
         for g in candidates:
             data["games"][g["slug"]] = g
-        for slug, league in plan_["live"].items():
+        live = dict(plan_["live"]) if enabled() else {}
+        data["positions"] = _positions_in_play(now)
+        for pos in data["positions"]:
+            live[pos["_game"]["slug"]] = pos["_game"]["league"]
+        for slug, league in live.items():
             game = fetch_game(slug, league)
             if game:
                 data["games"][slug] = game
         tokens = {s["token_id"] for slug in data["candidates"] for s in data["games"][slug]["sides"].values()}
-        tokens |= {s["token_id"] for slug in plan_["live"] if slug in data["games"]
+        tokens |= {s["token_id"] for slug in live if slug in data["games"]
                    for s in data["games"][slug]["sides"].values()}
         data["books"] = fetch_books(tokens) if tokens else {}
     except Exception as e:
@@ -258,8 +293,29 @@ def fetch(plan_, now):
             continue
         if payout is not None:
             data["payouts"][trade_id] = payout
-    STATE.update(leagues=leagues(), games_scheduled=len(_schedule), error=data["error"])
+    STATE.update(leagues=leagues(), games_scheduled=len(_schedule), error=data["error"],
+                 positions_in_play=len(data["positions"]))
     return data
+
+
+def _positions_in_play(now):
+    """Your covered positions whose game is under way (read only while a
+    scheduled game is), each tagged with its game and side."""
+    if not alerts_enabled():
+        return []
+    playing = [g for g in _schedule.values() if g["start"] <= now <= g["start"] + timedelta(hours=3)]
+    if not playing:
+        return []
+    by_token = {s["token_id"]: (g, side) for g in playing for side, s in g["sides"].items()}
+    rows, source, _ = positions_module.load_positions()
+    if source != "wallet":
+        return []
+    out = []
+    for p in rows:
+        hit = by_token.get(str(p.get("id")))
+        if hit and covers(p):
+            out.append({**p, "_game": hit[0], "_side": hit[1]})
+    return out
 
 
 def _enter(sec, game, books, now):
@@ -328,6 +384,10 @@ def apply(ledger, data, now, tz):
     """Entries, exits and settlements for one round (under the ledger lock). Returns messages."""
     sec = section(ledger)
     games, books = data["games"], data["books"]
+    messages = position_alerts(ledger, data, now) if alerts_enabled() else []
+    if not enabled():
+        STATE.update(last_scan_at=_iso(now))
+        return messages
     for slug in data["candidates"]:
         if slug in games:
             _enter(sec, games[slug], books, now)
@@ -354,7 +414,84 @@ def apply(ledger, data, now, tz):
         if "exit" not in trade:
             _exit(trade, game, books.get(trade["token_id"]) or {}, now)
     STATE.update(open=len(sec["open"]), last_scan_at=_iso(now))
-    return digest(sec, now, tz)
+    return messages + digest(sec, now, tz)
+
+# ─── ALERTS ON YOUR POSITIONS ────────────────────────────────────────────────
+
+ALERTS_INTRO = (
+    "⚽ تنبيهات الوقف المختلط تعمل الآن على صفقاتك الحقيقية.\n"
+    "لكل صفقة \"هل سيفوز الفريق؟ نعم\" في الدوريات المختارة، يتابع البوت المباراة كل دقيقة ويرسل تنبيهاً عند: "
+    "نزول السعر 15¢ عن سعر شرائك، أو الدقيقة 65 بلا هدف لفريقك، أو هدف لفريقك. "
+    "كل تنبيه مرة واحدة، ومعه كم ستستلم لو بعت الآن. صفقات محفظة البوت يأتي معها زر البيع.\n"
+    "هذه الصفقات لم تعد تصلها تنبيهات الوقف 30% والهدف 50% القديمة. البوت لا يبيع شيئاً بنفسه."
+)
+
+
+def position_alerts(ledger, data, now):
+    """Alerts on your covered positions, each rule once per position."""
+    sec = section(ledger)
+    messages = []
+    if not sec.get("alerts_intro"):
+        sec["alerts_intro"] = _iso(now)
+        messages.append(ALERTS_INTRO)
+    sent = sec.setdefault("alerted", {})
+    for key, at in list(sent.items()):
+        if now - _parse_time(at) > timedelta(days=3):
+            del sent[key]
+    for pos in data.get("positions", []):
+        game = data["games"].get(pos["_game"]["slug"])
+        token = str(pos["id"])
+        if game is None:
+            continue
+        book = data["books"].get(token) or {}
+        rule = exit_rule({"entry_price": float(pos.get("buy_price") or 0) / 100, "side": pos["_side"]},
+                         game, mid_price(book))
+        if rule is None:
+            continue
+        key = f"{pos.get('wallet', '')}:{token}:{rule}"
+        if key in sent:
+            continue
+        sent[key] = _iso(now)
+        STATE["alerts_sent"] += 1
+        messages.append(position_alert(pos, game, rule, book))
+    return messages
+
+
+def position_alert(pos, game, rule, book):
+    """The alert text, with a sell button for the bot wallet (a (text, markup) pair)."""
+    import trading
+    import telegram_actions  # imported here: it imports paper_trading, which imports this module
+
+    side = game["sides"][pos["_side"]]
+    team, shares, buy = side["team"], float(pos.get("shares") or 0), float(pos.get("buy_price") or 0)
+    m, score = minute(game), game["score"] or "0-0"
+    mid = mid_price(book)
+    headers = {
+        "price": "🔴 الوقف المختلط: السعر نزل 15¢ عن سعر شرائك",
+        "time": f"⏰ الوقف المختلط: الدقيقة {m} ولم يسجّل {team}",
+        "goal": f"🟢 الوقف المختلط: {team} سجّل، وقت جني الربح",
+    }
+    lines = [headers[rule], f"{game['title']}: {score} (الدقيقة {m})",
+             f"سعر شرائك {buy:g}¢" + (f"، والسعر الآن {mid * 100:.1f}¢" if mid is not None else "")]
+    sold, proceeds = stop_review.simulate_sell(book.get("bids") or [], shares, side["fee_rate"])
+    if sold > 0:
+        best = max(float(b["price"]) for b in book.get("bids") or [])
+        line = (f"بيع {sold:g} سهم الآن يعطي حوالي ${proceeds:.2f} (أفضل مشترٍ {best * 100:.0f}¢)، "
+                f"أي {_usd(proceeds - sold * buy / 100)} مقارنة بسعر شرائك")
+        if sold < shares:
+            line += f". لا مشترين لباقي الأسهم ({shares - sold:g})"
+        lines.append(line)
+    else:
+        lines.append("لا يوجد مشترون الآن: حاول بعد قليل.")
+    in_bot_wallet = bool(trading.trading_wallet()) and (pos.get("wallet") or "").lower() == trading.trading_wallet()
+    lines.append(f"المحفظة: {'محفظة البوت' if in_bot_wallet else 'المحفظة الرئيسية'}")
+    lines.append("القاعدة تقول: بِع. القرار لك، فالاستراتيجية ما زالت قيد الاختبار.")
+    if not in_bot_wallet and pos.get("url"):
+        lines.append(pos["url"])
+    text = "\n".join(lines)
+    if in_bot_wallet and trading.enabled():
+        return text, telegram_actions.sell_button(pos["id"])
+    return text
 
 # ─── REPORTS ─────────────────────────────────────────────────────────────────
 

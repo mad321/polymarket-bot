@@ -14,7 +14,8 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 os.environ["ENABLE_MONITOR"] = "0"
-os.environ["MATCH_TEST"] = "0"  # the football test has its own tests (test_match.py)
+os.environ["MATCH_TEST"] = "0"    # the football test and alerts have their own tests (test_match.py)
+os.environ["MATCH_ALERTS"] = "0"
 
 import paper_store
 import paper_trading as pt
