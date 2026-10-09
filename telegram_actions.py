@@ -50,9 +50,9 @@ def _clean(text):
 
 HELP = (
     "أوامر البوت:\n"
-    "/positions صفقات محفظة البوت، مع زر بيع لكل صفقة.\n"
+    "/positions صفقات المحافظ التي يبيع منها البوت، مع زر بيع لكل صفقة.\n"
     "/paper نتائج التداول على الورق لأسواق البيتكوين (بدون مال حقيقي)، ومراجعة تنبيهات وقف الخسارة والهدف.\n\n"
-    "التنبيهات تصلك هنا تلقائياً. تنبيهات صفقات محفظة البوت يأتي معها زر \"🔴 بيع الآن\"."
+    "التنبيهات تصلك هنا تلقائياً. تنبيهات الصفقات التي يستطيع البوت بيعها يأتي معها زر \"🔴 بيع الآن\"."
 )
 
 
@@ -60,8 +60,8 @@ def _chat_id():
     return _clean(os.environ.get("TELEGRAM_CHAT_ID") or "")
 
 
-def sell_button(asset_id):
-    key = trading.position_key(asset_id)
+def sell_button(asset_id, wallet=None):
+    key = trading.position_key(asset_id, wallet)
     return {"inline_keyboard": [[{"text": "🔴 بيع الآن", "callback_data": f"s:{key}"}]]}
 
 
@@ -129,12 +129,14 @@ def handle_command(text):
         _reply(f"⚠️ {e}")
         return
     if not positions:
-        _reply(_dry_run_note() + "لا توجد صفقات مفتوحة في محفظة البوت.")
+        _reply(_dry_run_note() + "لا توجد صفقات مفتوحة في المحافظ التي يبيع منها البوت.")
         return
-    _reply(_dry_run_note() + f"صفقات محفظة البوت: {len(positions)}")
+    _reply(_dry_run_note() + f"الصفقات التي يستطيع البوت بيعها: {len(positions)}")
     for p in positions:
-        _reply(f"{p['name']}\nالأسهم: {p['shares']}\nالسعر الحالي: {_cents(p['current_price'])}",
-               sell_button(p["asset_id"]))
+        wallet = trading.second_wallet() if p.get("second") else None
+        label = "المحفظة الثانية" if p.get("second") else "محفظة البوت"
+        _reply(f"{p['name']}\nالأسهم: {p['shares']}\nالسعر الحالي: {_cents(p['current_price'])}\nالمحفظة: {label}",
+               sell_button(p["asset_id"], wallet))
 
 # ─── BUTTONS ─────────────────────────────────────────────────────────────────
 
@@ -215,7 +217,8 @@ def _confirm(callback, message, rest):
 
 def _report_delayed(result, placed_at):
     try:
-        outcome = trading.await_delayed_fill(result["order_id"], result["asset_id"], placed_at)
+        outcome = trading.await_delayed_fill(result["order_id"], result["asset_id"], placed_at,
+                                             second=result.get("second", False))
     except Exception:
         logger.exception("Following a delayed sale failed")
         outcome = None

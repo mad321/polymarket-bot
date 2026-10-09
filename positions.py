@@ -161,7 +161,7 @@ def watched_wallets():
     Wallets to watch: WALLET_ADDRESS (comma-separated for several) plus the
     bot's trading wallet (TRADING_WALLET), lowercased and without duplicates.
     """
-    raw = f"{os.environ.get('WALLET_ADDRESS') or ''},{os.environ.get('TRADING_WALLET') or ''}"
+    raw = ",".join(os.environ.get(name) or "" for name in ("WALLET_ADDRESS", "TRADING_WALLET", "TRADING_WALLET_2"))
     wallets = []
     for address in raw.split(","):
         address = address.strip().lower()

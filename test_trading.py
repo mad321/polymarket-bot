@@ -26,7 +26,8 @@ MAIN_WALLET = "0xa1a1000000000000000000000000000000000002"
 ASSET = "75352308982559360810664047376087173948352198121226374582720762265018774664169"
 KEY = trading.position_key(ASSET)
 SETTINGS = ("WALLET_ADDRESS", "TRADING_WALLET", "TRADING_PRIVATE_KEY", "TRADING_ENABLED",
-            "TRADING_DRY_RUN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
+            "TRADING_DRY_RUN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+            "TRADING_WALLET_2", "TRADING_PRIVATE_KEY_2")
 
 
 def env(**values):
@@ -417,6 +418,101 @@ class MonitorButtonTests(unittest.TestCase):
     def test_no_button_when_disabled_or_for_other_wallets(self):
         self.assertIsNone(self.run_check(BOT_WALLET).args[1])
         self.assertIsNone(self.run_check(MAIN_WALLET, TRADING_ENABLED="1").args[1])
+
+
+
+class SecondWalletTests(unittest.TestCase):
+    """TRADING_WALLET_2: selling from a second wallet, e.g. the main account."""
+
+    KEY_2 = "0x" + "44" * 32
+
+    def setUp(self):
+        trading._client = FakeClient()
+        main = FakeClient(order=SimpleNamespace(ok=True, status="matched", order_id="0xmain",
+                                                making_amount=Decimal("60.45"), taking_amount=Decimal("14.51")))
+        main.wallet = MAIN_WALLET
+        trading._client_2 = main
+        self.calls = []
+        patcher = mock.patch("telegram_actions.alerts.telegram_api",
+                             side_effect=lambda method, payload, **kw: self.calls.append((method, payload)) or ({}, None))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        trading._client = trading._client_2 = None
+
+    def both(self, **extra):
+        settings = dict(TELEGRAM_CHAT_ID="42", TRADING_ENABLED="1", TRADING_DRY_RUN="0",
+                        TRADING_WALLET=BOT_WALLET, TRADING_PRIVATE_KEY="0x" + "33" * 32,
+                        TRADING_WALLET_2=MAIN_WALLET.upper(), TRADING_PRIVATE_KEY_2=self.KEY_2)
+        settings.update(extra)
+        return env(**settings)
+
+    def test_the_second_wallet_counts_only_with_its_key(self):
+        with env(TRADING_ENABLED="1", TRADING_WALLET=BOT_WALLET, TRADING_WALLET_2=MAIN_WALLET):
+            self.assertEqual(trading.second_wallet(), "")
+            self.assertFalse(trading.can_sell(MAIN_WALLET))
+            self.assertTrue(trading.can_sell(BOT_WALLET))
+        with self.both():
+            self.assertEqual(trading.second_wallet(), MAIN_WALLET)
+            self.assertTrue(trading.can_sell(MAIN_WALLET))
+        with self.both(TRADING_ENABLED="0"):
+            self.assertFalse(trading.can_sell(MAIN_WALLET))
+
+    def test_lists_both_wallets_with_distinct_keys(self):
+        with self.both():
+            rows = trading.list_positions()
+        self.assertEqual([r["second"] for r in rows], [False, True])
+        self.assertEqual(rows[0]["key"], KEY)
+        with self.both():
+            self.assertEqual(rows[1]["key"], trading.position_key(ASSET, MAIN_WALLET))
+        self.assertNotEqual(rows[0]["key"], rows[1]["key"])
+
+    def test_sells_from_the_wallet_that_holds_the_position(self):
+        with self.both():
+            key_2 = trading.position_key(ASSET, MAIN_WALLET)
+            result = trading.sell(key_2, "60", "0.24")
+        self.assertEqual((result["order_id"], result["second"]), ("0xmain", True))
+        self.assertEqual(trading._client.placed, [])
+        self.assertEqual(len(trading._client_2.placed), 1)
+
+    def test_a_broken_second_wallet_does_not_block_the_bot_wallet(self):
+        trading._client_2 = None
+        with self.both(), mock.patch("polymarket.SecureClient.create") as create:
+            rows = trading.list_positions()  # the throwaway key 0x44.. does not own MAIN_WALLET
+        create.assert_not_called()
+        self.assertEqual([r["second"] for r in rows], [False])
+        self.assertIn("TRADING_WALLET_2", trading.status()["wallet_2"]["client_error"])
+
+    def test_both_keys_are_redacted(self):
+        with self.both():
+            self.assertNotIn("44" * 32, trading._redact(f"boom {self.KEY_2}"))
+
+    def test_positions_command_labels_each_wallet(self):
+        with self.both():
+            telegram_actions.handle_command("/positions")
+        texts = [p["text"] for m, p in self.calls if m == "sendMessage"]
+        self.assertIn("الصفقات التي يستطيع البوت بيعها: 2", texts[0])
+        self.assertIn("المحفظة: محفظة البوت", texts[1])
+        self.assertIn("المحفظة: المحفظة الثانية", texts[2])
+        buttons = [p["reply_markup"]["inline_keyboard"][0][0]["callback_data"] for m, p in self.calls
+                   if m == "sendMessage" and p.get("reply_markup")]
+        self.assertEqual(len(set(buttons)), 2)
+
+    def test_main_wallet_alert_gets_a_button_once_its_key_is_set(self):
+        pos = dict(id=ASSET, wallet=MAIN_WALLET, name="n", shares=60, current_price=25.0,
+                   stop_loss=32.2, take_profit=69.0, pnl_usd=-12.6, url="u")
+        with self.both(), \
+                mock.patch.object(monitor, "load_positions", return_value=([pos], "wallet", None)), \
+                mock.patch.object(monitor.alerts, "send_alert", return_value=True) as send, \
+                mock.patch.object(monitor.stop_review, "record"), mock.patch.object(monitor.exposure, "check"):
+            monitor.check_once({})
+            expected = f"s:{trading.position_key(ASSET, MAIN_WALLET)}"
+        self.assertEqual(send.call_args.args[1]["inline_keyboard"][0][0]["callback_data"], expected)
+
+    def test_the_second_wallet_is_watched(self):
+        with env(WALLET_ADDRESS=MAIN_WALLET, TRADING_WALLET=BOT_WALLET, TRADING_WALLET_2=MAIN_WALLET.upper()):
+            self.assertEqual(positions.watched_wallets(), [MAIN_WALLET, BOT_WALLET])
 
 
 if __name__ == "__main__":
