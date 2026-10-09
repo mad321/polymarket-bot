@@ -128,6 +128,11 @@ def handle_command(text):
     except trading.TradingError as e:
         _reply(f"⚠️ {e}")
         return
+    # Set while the second wallet is configured but its client could not be made.
+    error_2 = (trading.STATUS["wallet_2"].get("client_error")
+               if trading.second_wallet() and trading._client_2 is None else None)
+    if error_2:
+        _reply(f"⚠️ المحفظة الثانية لا تعمل، فصفقاتها غير معروضة: {error_2}")
     if not positions:
         _reply(_dry_run_note() + "لا توجد صفقات مفتوحة في المحافظ التي يبيع منها البوت.")
         return

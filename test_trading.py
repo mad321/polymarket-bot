@@ -510,6 +510,27 @@ class SecondWalletTests(unittest.TestCase):
             expected = f"s:{trading.position_key(ASSET, MAIN_WALLET)}"
         self.assertEqual(send.call_args.args[1]["inline_keyboard"][0][0]["callback_data"], expected)
 
+    def test_pasted_junk_is_cleaned_and_bad_keys_are_explained(self):
+        clean = "ab" * 32
+        with env(TRADING_PRIVATE_KEY_2=f' "0x{clean}"\u200f\n'):
+            self.assertEqual(trading._env("TRADING_PRIVATE_KEY_2"), f"0x{clean}")
+            self.assertIsNone(trading.key_problem("TRADING_PRIVATE_KEY_2"))
+        with env(TRADING_PRIVATE_KEY_2="0x" + "zz" * 32):
+            self.assertIn("أحرف لا تكون في المفتاح", trading.key_problem("TRADING_PRIVATE_KEY_2"))
+        with env(TRADING_PRIVATE_KEY_2="ab" * 20):
+            self.assertIn("طوله 40", trading.key_problem("TRADING_PRIVATE_KEY_2"))
+        with env(TRADING_PRIVATE_KEY_2=" ".join(["word"] * 12)):
+            self.assertIn("لا الكلمات الـ 12", trading.key_problem("TRADING_PRIVATE_KEY_2"))
+
+    def test_positions_command_says_why_the_second_wallet_is_missing(self):
+        trading._client_2 = None
+        with self.both(TRADING_PRIVATE_KEY_2="0x" + "zz" * 32):
+            telegram_actions.handle_command("/positions")
+        texts = [p["text"] for m, p in self.calls if m == "sendMessage"]
+        self.assertIn("المحفظة الثانية لا تعمل", texts[0])
+        self.assertIn("أحرف لا تكون في المفتاح", texts[0])
+        self.assertNotIn("zz" * 32, " ".join(texts))
+
     def test_the_second_wallet_is_watched(self):
         with env(WALLET_ADDRESS=MAIN_WALLET, TRADING_WALLET=BOT_WALLET, TRADING_WALLET_2=MAIN_WALLET.upper()):
             self.assertEqual(positions.watched_wallets(), [MAIN_WALLET, BOT_WALLET])

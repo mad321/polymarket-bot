@@ -52,8 +52,31 @@ class TradingError(Exception):
     """A failure to show the user as is (Arabic)."""
 
 
+# Spaces, line breaks, quotes and invisible direction marks that copy-paste
+# (phones, RTL keyboards) slips into a pasted key or address.
+_JUNK = dict.fromkeys(map(ord, " \t\r\n\"'`\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e"
+                              "\u2066\u2067\u2068\u2069\ufeff\u00a0"))
+
+
 def _env(name):
-    return (os.environ.get(name) or "").strip()
+    value = (os.environ.get(name) or "").strip()
+    if name.startswith(("TRADING_PRIVATE_KEY", "TRADING_WALLET")):
+        value = value.translate(_JUNK)
+    return value
+
+
+def key_problem(name):
+    """Why a private key setting cannot be a key, in Arabic, or None. Never shows the key."""
+    key = _env(name).removeprefix("0x").removeprefix("0X")
+    if not key:
+        return None
+    if " " in (os.environ.get(name) or "").strip() and len((os.environ.get(name) or "").split()) >= 12:
+        return f"{name} فيه كلمات وليس مفتاحاً: ضع المفتاح السري (64 حرفاً من 0-9 و a-f)، لا الكلمات الـ 12."
+    if any(c not in "0123456789abcdefABCDEF" for c in key):
+        return f"{name} فيه أحرف لا تكون في المفتاح: المفتاح 64 حرفاً من 0-9 و a-f فقط (قد يبدأ بـ 0x)."
+    if len(key) != 64:
+        return f"{name} طوله {len(key)} حرفاً، والمفتاح 64 حرفاً (بدون 0x): ربما نُسخ ناقصاً أو زائداً."
+    return None
 
 
 def enabled():
@@ -141,6 +164,10 @@ def _get_client(second=False):
             return current
         if not (_env(key_var) and _env(wallet_var)):
             raise TradingError(f"إعدادات التداول ناقصة: أضف {wallet_var} و {key_var} في Render.")
+        problem = key_problem(key_var)
+        if problem:
+            status["client_error"] = problem
+            raise TradingError(problem)
         # Imported here so the alerts keep working even if this package fails.
         from polymarket import SecureClient
         from polymarket._internal.environment import get_environment_config
