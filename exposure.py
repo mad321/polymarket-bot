@@ -22,6 +22,7 @@ import logging
 
 import requests
 
+import alert_memory
 import positions as positions_module
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ ACTIVE = False  # set by the monitor loop; direct check_once() calls (tests) ski
 STATE = {"limit_pct": None, "last_check_at": None, "events_over_limit": 0, "error": None}
 
 _last_check = 0.0
-_last_alert = {}  # event -> time of its last alert
+_last_alert = alert_memory.exposure_sent  # event -> time of its last alert (kept across restarts)
 
 
 def limit_pct():
