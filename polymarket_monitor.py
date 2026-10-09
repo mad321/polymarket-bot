@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 import pytz
 import requests
 
+import alert_memory
 import alerts
 import exposure
 import match_strategy
@@ -44,6 +45,7 @@ POLYMARKET_API = "https://clob.polymarket.com"
 
 CHECK_INTERVAL = 30          # seconds between price checks
 RETRY_AFTER_FAILURE = 300    # seconds before retrying an alert no channel accepted
+RESTORE_WAIT = 90            # seconds to wait at start for the saved alert times
 ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN", 3600))
 
 try:
@@ -199,7 +201,13 @@ def main():
     if os.environ.get("STARTUP_ALERT", "1") != "0":
         alerts.send_alert(STARTUP_MESSAGE)
 
-    next_alert_at: dict[str, float] = {}   # position id → earliest next alert
+    # Position id → earliest next alert, kept in the pinned ledger across restarts.
+    # Wait briefly for the ledger loop to restore it, so a restart does not
+    # repeat every alert at once.
+    import paper_trading
+    if paper_trading.ledger_available() and not alert_memory.wait(RESTORE_WAIT):
+        logger.warning("Alert times not restored in time: starting without them")
+    next_alert_at = alert_memory.next_alert_at
     try:
         while True:
             try:

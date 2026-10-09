@@ -3,7 +3,7 @@
 ## اختبارات الوحدة (بدون إنترنت)
 
 ```bash
-python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py
+python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py
 ```
 
 **ماذا تختبر:** المراقب، والتنبيهات، وقراءة الصفقات من Data API v2، وزر البيع في تيليجرام، والبيع من محفظة البوت، والتداول على الورق وحفظ سجله، ومراجعة تنبيهات الوقف والهدف، وتنبيه حجم الصفقة، واختبار الوقف المختلط للمباريات. كل الاتصالات الخارجية فيها وهمية، فلا ترسل شيئاً ولا تبيع شيئاً.
@@ -179,7 +179,7 @@ pip install -r requirements.txt
 لا يوجد CI في هذا المستودع، فلا تُشغَّل الاختبارات تلقائياً. شغّل اختبارات الوحدة بنفسك قبل الدمج في `monitor-branch`، لأن Render ينشر كل دمج فوراً:
 
 ```bash
-python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py
+python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py
 ```
 
 ---

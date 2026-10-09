@@ -46,6 +46,7 @@ from statistics import NormalDist, stdev
 import pytz
 import requests
 
+import alert_memory
 import alerts
 import match_strategy
 import paper_store
@@ -256,6 +257,7 @@ def new_ledger(now):
         "snapshots": {},
         "calibration": {"n": 0, "model": 0.0, "market": 0.0},
         "level_alerts": {"open": [], "closed": []},  # stop_review.py
+        "alert_memory": {"next_alert_at": {}, "exposure_sent": {}},  # alert_memory.py
         "best_edge": None,
         "last_summary_at": _iso(now),
         "summary_week": None,
@@ -542,6 +544,8 @@ def scan_once(ledger, now=None):
             messages += settle(ledger, winners, now)
             if data:
                 messages += open_trades(ledger, *data, now)
+        if alert_memory.ready():  # never overwrite saved times before they were restored
+            ledger["alert_memory"] = alert_memory.snapshot(now.timestamp())
         if summary_due(ledger, now):
             messages.append(summary_text(ledger, now, "ملخص الأسبوع للتداول على الورق"))
             ledger.update(summary_week=_week(now), last_summary_at=_iso(now), best_edge=None)
@@ -583,6 +587,7 @@ def run_forever():
                 if ledger is None:
                     ledger, dirty = new_ledger(datetime.now(timezone.utc)), True
                     alerts.send_alert(INTRO.format(stake=STAKE, edge=MIN_EDGE * 100))
+                alert_memory.restore(ledger.get("alert_memory"))
                 with _lock:
                     _ledger = ledger
                 STATE.update(loaded=True, open_trades=len(ledger["open"]))

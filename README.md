@@ -51,7 +51,7 @@ python polymarket_bot.py
 
 ```bash
 # اختبارات المراقب والتنبيهات والبيع والتداول على الورق (بدون إنترنت)
-python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py
+python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py
 
 # فحوص إضافية
 python test_local.py   # محلي
