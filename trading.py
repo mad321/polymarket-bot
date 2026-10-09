@@ -1,8 +1,8 @@
 """
-Selling from the bot's wallet
-=============================
-Sells a position of the bot's own Polymarket wallet when you confirm in
-Telegram. It only sells: it never buys, and it only touches TRADING_WALLET.
+Selling from the bot's wallets
+==============================
+Sells a position of a trading wallet when you confirm in Telegram. It only
+sells: it never buys, and it only touches the wallets set below.
 
 Settings (Render → Environment):
   TRADING_ENABLED=1     show "sell" buttons in Telegram (default: off)
@@ -10,6 +10,8 @@ Settings (Render → Environment):
   TRADING_WALLET        the bot account's Polymarket wallet address
                         (polymarket.com profile menu)
   TRADING_PRIVATE_KEY   private key of the MetaMask account that owns it
+  TRADING_WALLET_2      optional second wallet to sell from, e.g. your main
+  TRADING_PRIVATE_KEY_2 account; its key controls everything in that account
 
 A sale is a Fill-and-Kill market order with a minimum price: it sells what
 the order book takes at or above that price right away and cancels the rest,
@@ -37,9 +39,11 @@ STATUS = {
     "client_error": None,
     "geoblock": None,
     "last_order": None,
+    "wallet_2": {"connected": False, "wallet_type": None, "client_error": None},
 }
 
-_client = None
+_client = None        # the bot wallet (TRADING_WALLET)
+_client_2 = None      # the optional second wallet (TRADING_WALLET_2)
 _client_lock = threading.Lock()
 _sell_lock = threading.Lock()  # one sale at a time, so a double tap cannot sell twice
 
@@ -64,8 +68,24 @@ def trading_wallet():
     return _env("TRADING_WALLET").lower()
 
 
+def second_wallet():
+    """TRADING_WALLET_2 when it is set with its key, else ""."""
+    wallet = _env("TRADING_WALLET_2").lower()
+    return wallet if wallet and _env("TRADING_PRIVATE_KEY_2") and wallet != trading_wallet() else ""
+
+
 def configured():
-    return bool(_env("TRADING_PRIVATE_KEY") and trading_wallet())
+    return bool(_env("TRADING_PRIVATE_KEY") and trading_wallet()) or bool(second_wallet())
+
+
+def can_sell(wallet):
+    """True when sell buttons belong on this wallet's positions."""
+    wallet = (wallet or "").lower()
+    if not enabled() or not wallet:
+        return False
+    # The bot wallet keeps its button without a key: tapping it explains the
+    # missing setting. The second wallet gets buttons only once its key is set.
+    return wallet == trading_wallet() or wallet == second_wallet()
 
 
 def _now():
@@ -73,15 +93,21 @@ def _now():
 
 
 def _redact(text):
-    key = _env("TRADING_PRIVATE_KEY")
-    for secret in (key, key.removeprefix("0x")):
-        if secret:
-            text = text.replace(secret, "***")
+    for name in ("TRADING_PRIVATE_KEY", "TRADING_PRIVATE_KEY_2"):
+        key = _env(name)
+        for secret in (key, key.removeprefix("0x")):
+            if secret:
+                text = text.replace(secret, "***")
     return text
 
 
-def position_key(asset_id):
-    """Short stable id for a position, to fit Telegram's 64-byte button data."""
+def position_key(asset_id, wallet=None):
+    """Short stable id for a position, to fit Telegram's 64-byte button data.
+    Positions of the second wallet include the wallet, so the same market held
+    in both wallets gets two different buttons."""
+    wallet = (wallet or "").lower()
+    if wallet and wallet == second_wallet():
+        return hashlib.sha256(f"{wallet}:{asset_id}".encode()).hexdigest()[:10]
     return hashlib.sha256(str(asset_id).encode()).hexdigest()[:10]
 
 
@@ -104,13 +130,17 @@ def check_geoblock():
         STATUS["geoblock"] = {"error": str(e)}
 
 
-def _get_client():
-    global _client
+def _get_client(second=False):
+    """The client of the bot wallet, or of the second wallet."""
+    global _client, _client_2
+    wallet_var, key_var = ("TRADING_WALLET_2", "TRADING_PRIVATE_KEY_2") if second else ("TRADING_WALLET", "TRADING_PRIVATE_KEY")
+    status = STATUS["wallet_2"] if second else STATUS
     with _client_lock:
-        if _client is not None:
-            return _client
-        if not configured():
-            raise TradingError("إعدادات التداول ناقصة: أضف TRADING_WALLET و TRADING_PRIVATE_KEY في Render.")
+        current = _client_2 if second else _client
+        if current is not None:
+            return current
+        if not (_env(key_var) and _env(wallet_var)):
+            raise TradingError(f"إعدادات التداول ناقصة: أضف {wallet_var} و {key_var} في Render.")
         # Imported here so the alerts keep working even if this package fails.
         from polymarket import SecureClient
         from polymarket._internal.environment import get_environment_config
@@ -118,25 +148,29 @@ def _get_client():
         from polymarket.environments import PRODUCTION
         from eth_account import Account
 
-        key, wallet = _env("TRADING_PRIVATE_KEY"), _env("TRADING_WALLET")
+        key, wallet = _env(key_var), _env(wallet_var)
         try:
             signer = Account.from_key(key).address
             # A wallet the key does not own would silently be treated as a
             # session key; refuse instead, with a message that says why.
             derivation = get_environment_config(PRODUCTION).wallet_derivation
             if try_classify_wallet_type(signer=signer, wallet=wallet, config=derivation) is None:
-                raise TradingError("المفتاح السري لا يملك هذه المحفظة: تأكد أن TRADING_WALLET هو عنوان محفظة "
-                                   "بوليماركت لنفس حساب MetaMask الذي أخذت منه المفتاح.")
-            _client = SecureClient.create(private_key=key, wallet=wallet)
+                raise TradingError(f"المفتاح السري لا يملك هذه المحفظة: تأكد أن {wallet_var} هو عنوان محفظة "
+                                   f"بوليماركت لنفس الحساب الذي أخذت منه المفتاح ({key_var}).")
+            client = SecureClient.create(private_key=key, wallet=wallet)
         except TradingError as e:
-            STATUS["client_error"] = str(e)
+            status["client_error"] = str(e)
             raise
         except Exception as e:
-            STATUS["client_error"] = _redact(f"{type(e).__name__}: {e}")
-            logger.error(f"[TRADING] client error: {STATUS['client_error']}")
+            status["client_error"] = _redact(f"{type(e).__name__}: {e}")
+            logger.error(f"[TRADING] client error ({wallet_var}): {status['client_error']}")
             raise TradingError("تعذر الاتصال بحساب التداول في بوليماركت. التفاصيل في صفحة الحالة.") from None
-        STATUS.update(connected=True, wallet_type=_client.wallet_type, client_error=None)
-        return _client
+        if second:
+            _client_2 = client
+        else:
+            _client = client
+        status.update(connected=True, wallet_type=client.wallet_type, client_error=None)
+        return client
 
 
 def _name(p):
@@ -144,26 +178,45 @@ def _name(p):
     return f"{title} — {p.outcome}" if p.outcome else title
 
 
+def _wallet_clients():
+    """[(second, client)] for each wallet the bot can sell from. A wallet whose
+    client fails is skipped (its error is on the status page) unless none works."""
+    out, error = [], None
+    slots = [False] if _client is not None or _env("TRADING_PRIVATE_KEY") or not second_wallet() else []
+    if second_wallet():
+        slots.append(True)
+    for second in slots:
+        try:
+            out.append((second, _get_client(second)))
+        except TradingError as e:
+            error = error or e
+    if not out:
+        raise error or TradingError("إعدادات التداول ناقصة: أضف TRADING_WALLET و TRADING_PRIVATE_KEY في Render.")
+    return out
+
+
 def list_positions():
-    """Open positions of the trading wallet that can still be sold."""
+    """Open positions of the trading wallets that can still be sold."""
     from polymarket import PolymarketError
 
-    client = _get_client()
     out = []
-    try:
-        for p in client.list_positions(user=client.wallet, status="OPEN").iter_items():
-            shares = p.current_size.quantize(SHARE_STEP, rounding=ROUND_DOWN)
-            if p.redeemable or shares <= 0:
-                continue
-            out.append({
-                "key": position_key(p.asset_id),
-                "asset_id": str(p.asset_id),
-                "name": _name(p),
-                "shares": shares,
-                "current_price": p.current_price,
-            })
-    except PolymarketError as e:
-        raise TradingError(_redact(f"تعذر قراءة صفقات محفظة البوت: {e}")) from None
+    for second, client in _wallet_clients():
+        wallet = second_wallet() if second else trading_wallet()
+        try:
+            for p in client.list_positions(user=client.wallet, status="OPEN").iter_items():
+                shares = p.current_size.quantize(SHARE_STEP, rounding=ROUND_DOWN)
+                if p.redeemable or shares <= 0:
+                    continue
+                out.append({
+                    "key": position_key(p.asset_id, wallet if second else None),
+                    "asset_id": str(p.asset_id),
+                    "name": _name(p),
+                    "shares": shares,
+                    "current_price": p.current_price,
+                    "second": second,
+                })
+        except PolymarketError as e:
+            raise TradingError(_redact(f"تعذر قراءة صفقات {'المحفظة الثانية' if second else 'محفظة البوت'}: {e}")) from None
     return out
 
 
@@ -171,7 +224,7 @@ def _find(key):
     for p in list_positions():
         if p["key"] == key:
             return p
-    raise TradingError("لم أجد هذه الصفقة في محفظة البوت. ربما بِيعت أو حُسم السوق.")
+    raise TradingError("لم أجد هذه الصفقة في المحافظ التي يبيع منها البوت. ربما بِيعت أو حُسم السوق.")
 
 
 def quote(key):
@@ -180,11 +233,12 @@ def quote(key):
 
     position = _find(key)
     try:
-        minimum = _get_client().get_order_book(asset_id=position["asset_id"]).min_order_size
+        client = _get_client(position.get("second", False))
+        minimum = client.get_order_book(asset_id=position["asset_id"]).min_order_size
         if position["shares"] < minimum:
             raise TradingError(f"لا يمكن البيع: أقل كمية يقبلها هذا السوق {minimum.normalize():f} سهم، "
                                f"وعندك {position['shares']} فقط.")
-        price = _get_client().estimate_market_price(
+        price = client.estimate_market_price(
             asset_id=position["asset_id"], side="SELL",
             shares=str(position["shares"]), order_type="FAK",
         )
@@ -214,13 +268,14 @@ def sell(key, shares, min_price):
         if shares <= 0:
             raise TradingError("لا توجد أسهم للبيع في هذه الصفقة.")
         result = {"at": _now(), "name": position["name"], "asset_id": position["asset_id"],
-                  "shares": str(shares), "min_price": str(min_price), "dry_run": dry_run()}
+                  "shares": str(shares), "min_price": str(min_price), "dry_run": dry_run(),
+                  "second": position.get("second", False)}
 
         if dry_run():
             result.update(ok=True, status="dry_run")
         else:
             try:
-                resp = _get_client().place_market_order(
+                resp = _get_client(position.get("second", False)).place_market_order(
                     asset_id=position["asset_id"], side="SELL", shares=str(shares),
                     min_price=str(min_price), order_type="FAK",
                 )
@@ -241,7 +296,7 @@ def sell(key, shares, min_price):
         _sell_lock.release()
 
 
-def await_delayed_fill(order_id, asset_id, placed_at, timeout=60, poll=3):
+def await_delayed_fill(order_id, asset_id, placed_at, timeout=60, poll=3, second=False):
     """
     Live sports markets hold an order a few seconds before matching, so the
     sale is accepted as "delayed" with nothing filled yet. Polls the CLOB until
@@ -251,7 +306,7 @@ def await_delayed_fill(order_id, asset_id, placed_at, timeout=60, poll=3):
     """
     from polymarket import PolymarketError
 
-    client = _get_client()
+    client = _get_client(second)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         time.sleep(poll)

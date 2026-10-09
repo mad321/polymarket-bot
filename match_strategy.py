@@ -489,8 +489,8 @@ def position_alert(pos, game, rule, book):
     if not in_bot_wallet and pos.get("url"):
         lines.append(pos["url"])
     text = "\n".join(lines)
-    if in_bot_wallet and trading.enabled():
-        return text, telegram_actions.sell_button(pos["id"])
+    if trading.can_sell(pos.get("wallet")):
+        return text, telegram_actions.sell_button(pos["id"], pos.get("wallet"))
     return text
 
 # ─── REPORTS ─────────────────────────────────────────────────────────────────

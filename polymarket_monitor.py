@@ -164,9 +164,9 @@ def check_once(next_alert_at: dict[str, float]) -> None:
         # Per wallet: the same market held in two wallets alerts for each.
         pid = f"{pos.get('wallet', '')}:{pos.get('id') or pos.get('name', 'unknown')}"
         if now >= next_alert_at.get(pid, 0):
-            # Positions of the bot's own wallet get a sell button (Telegram only).
-            buttons = (telegram_actions.sell_button(pos["id"])
-                       if trading.enabled() and _in_trading_wallet(pos) else None)
+            # Positions of a wallet the bot can sell from get a sell button (Telegram only).
+            buttons = (telegram_actions.sell_button(pos["id"], pos.get("wallet"))
+                       if trading.can_sell(pos.get("wallet")) else None)
             sent = alerts.send_alert(format_alert(pos, price, reason), buttons)
             next_alert_at[pid] = now + (ALERT_COOLDOWN if sent else RETRY_AFTER_FAILURE)
             logger.info(f"{reason} alert for {pos['name']} at {price}¢: "
