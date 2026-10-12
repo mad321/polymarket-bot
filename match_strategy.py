@@ -67,6 +67,40 @@ TIME_STOP_MINUTE = 65
 SCHEDULE_EVERY = timedelta(minutes=10)
 SETTLE_EVERY = timedelta(minutes=10)
 DIGEST_HOUR = 9  # morning digest, ALERT_TZ
+
+# ── مستويات السيولة (حجم التداول الكلي للسوق) ──────────────────────────────
+# المستوى 1 - حد أدنى مطلق: لا دخول تحته أبداً
+LIQUIDITY_MIN = 5_000
+# المستوى 2 - المنطقة الذهبية: دخول مريح
+LIQUIDITY_GOOD = 8_000
+# المستوى 3 - مثالي: أفضل سيولة وأقل انزلاق سعري
+LIQUIDITY_IDEAL = 15_000
+
+
+def liquidity_tier(volume: float) -> str:
+    """
+    تحديد مستوى السيولة لسوق معين.
+    يُستخدم في تقرير الورق وتنبيهات الصفقات.
+
+    المستوى 1 ($5k+):  حد أدنى — دخول مسموح لكن بحذر
+    المستوى 2 ($8k+):  منطقة ذهبية — دخول مريح
+    المستوى 3 ($15k+): مثالي — أفضل تنفيذ وأقل انزلاق
+
+    أقل من $5k: مرفوض
+    """
+    if volume >= LIQUIDITY_IDEAL:
+        return "مثالي ✅"
+    elif volume >= LIQUIDITY_GOOD:
+        return "جيد 🟡"
+    elif volume >= LIQUIDITY_MIN:
+        return "مقبول ⚠️"
+    else:
+        return "مرفوض 🔴"
+
+
+def liquidity_ok(volume: float) -> bool:
+    """True إذا كانت السيولة كافية للدخول (المستوى 1 فما فوق)."""
+    return volume >= LIQUIDITY_MIN
 RULES = {"price": "السعر نزل 15¢", "time": "الدقيقة 65 بلا هدف", "goal": "هدف للفريق"}
 FINISHED = ("FT", "VFT", "AET", "PEN", "FINISHED", "ENDED")
 
@@ -153,10 +187,12 @@ def parse_game(event, league=None):
         start = _parse_time(event.get("startTime") or event["endDate"])
     except (KeyError, ValueError):
         return None
+    # حجم تداول الحدث = مجموع حجوم جميع الأسواق فيه
+    volume = sum(float(m.get("volume") or 0) for m in (event.get("markets") or []))
     return {"slug": event["slug"], "league": league, "title": title, "start": start, "sides": sides,
             "live": bool(event.get("live")), "ended": bool(event.get("ended")),
             "period": str(event.get("period") or "").upper(), "elapsed": str(event.get("elapsed") or ""),
-            "score": str(event.get("score") or "")}
+            "score": str(event.get("score") or ""), "volume": round(volume, 2)}
 
 
 def minute(game):
@@ -333,7 +369,10 @@ def _enter(sec, game, books, now):
                 "id": f"{game['slug']}:{side}", "slug": game["slug"], "league": game["league"],
                 "title": game["title"], "team": s["team"], "side": side, "market_id": s["market_id"],
                 "token_id": s["token_id"], "fee_rate": s["fee_rate"], "start": _iso(game["start"]),
-                "entry_at": _iso(now), "entry_price": round(price, 4), **fill,
+                "entry_at": _iso(now), "entry_price": round(price, 4),
+                "volume": game.get("volume", 0),
+                "liquidity_tier": liquidity_tier(game.get("volume", 0)),
+                **fill,
             })
             return True
     return False
@@ -390,7 +429,21 @@ def apply(ledger, data, now, tz):
         return messages
     for slug in data["candidates"]:
         if slug in games:
-            _enter(sec, games[slug], books, now)
+            game = games[slug]
+            vol = game.get("volume", 0)
+            if not liquidity_ok(vol):
+                # سيولة غير كافية — تسجيل التخطي مع السبب
+                if slug not in _counted_skips:
+                    _counted_skips.add(slug)
+                    sec["skipped"] += 1
+                    sec.setdefault("skipped_liquidity", []).append({
+                        "slug": slug, "title": game["title"],
+                        "volume": vol, "tier": liquidity_tier(vol),
+                        "at": _iso(now),
+                    })
+                logger.info(f"[MATCH] تخطي {game['title']} — سيولة {vol:,.0f}$ ({liquidity_tier(vol)})")
+            else:
+                _enter(sec, game, books, now)
     entered = {t["slug"] for t in sec["open"] + sec["closed"]}
     for slug in data.get("started", []):
         if slug not in entered and slug not in _counted_skips:
@@ -537,8 +590,21 @@ def digest(sec, now, tz):
 def summary_lines(ledger):
     sec = section(ledger)
     closed = sec["closed"]
+    skipped_liq = sec.get("skipped_liquidity") or []
     lines = [f"⚽ اختبار الوقف المختلط: {len(closed)} مباراة حُسمت، {len(sec['open'])} جارية، "
              f"{sec['skipped']} بلا فريق بين 55¢ و75¢"]
+    if skipped_liq:
+        lines.append(f"🚫 تخطّى {len(skipped_liq)} مباراة بسبب سيولة منخفضة (أقل من ${LIQUIDITY_MIN:,})")
+    # مستويات السيولة للصفقات المغلقة
+    if closed:
+        tiers = {"مثالي ✅": 0, "جيد 🟡": 0, "مقبول ⚠️": 0}
+        for t in closed:
+            tier = t.get("liquidity_tier", "")
+            if tier in tiers:
+                tiers[tier] += 1
+        tier_str = " | ".join(f"{k}: {v}" for k, v in tiers.items() if v > 0)
+        if tier_str:
+            lines.append(f"💧 مستويات السيولة: {tier_str}")
     lines += results_lines(closed)
     return lines
 
