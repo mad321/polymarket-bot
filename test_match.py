@@ -26,7 +26,8 @@ def event(score="", elapsed="", period="", live=False, ended=False):
     def market(mid, title, yes, no):
         return {"id": mid, "groupItemTitle": title, "sportsMarketType": "moneyline",
                 "outcomes": '["Yes", "No"]', "clobTokenIds": json.dumps([yes, no]),
-                "feesEnabled": True, "feeSchedule": {"rate": 0.05}, "orderMinSize": 5}
+                "feesEnabled": True, "feeSchedule": {"rate": 0.05}, "orderMinSize": 5,
+                "volume": 20000}  # above the liquidity filter
     return {"slug": "epl-che-bou-2026-10-10", "title": "Chelsea FC vs. AFC Bournemouth", "gameId": 1,
             "startTime": "2026-10-10T14:00:00Z", "endDate": "2026-10-10T14:00:00Z",
             "score": score, "elapsed": elapsed, "period": period, "live": live, "ended": ended,
@@ -140,7 +141,7 @@ class StrategyTests(unittest.TestCase):
         self.enter()
         self.tick(66, None, 0.40, score="0-0", elapsed="66", period="2H")
         t = self.sec["open"][0]
-        self.assertEqual((t.get("pending"), "exit" in t), ("time", False))
+        self.assertEqual((t["pending_by"].get("full"), "exit" in t), ("time", False))
         self.tick(67, 0.30, 0.40, score="1-0", elapsed="67", period="2H")  # sells for the first rule
         self.assertEqual(self.sec["open"][0]["exit"]["rule"], "time")
 
@@ -157,10 +158,31 @@ class StrategyTests(unittest.TestCase):
         paid = t["cost"] + t["fee"]
         self.assertAlmostEqual(t["hold_pnl"], 16.12 - paid, places=3)       # Chelsea came back to win
         self.assertAlmostEqual(t["strategy_pnl"], t["exit"]["proceeds"] - paid, places=3)
-        lines = ms.summary_lines(self.ledger)
-        self.assertIn("1 مباراة حُسمت", lines[0])
-        self.assertIn("الاحتفاظ أفضل", lines[3])
-        self.assertIn("الخروج: بالسعر 1، بالوقت 0، بالهدف 0، بلا خروج 0", lines[4])
+        text = "\n".join(ms.summary_lines(self.ledger))
+        self.assertIn("1 مباراة حُسمت", text)
+        self.assertIn("الاحتفاظ أفضل", text)
+        self.assertIn("الخروج: بالسعر 1، بالوقت 0، بالهدف 0، بلا خروج 0", text)
+
+    def test_variants_run_side_by_side_on_the_same_trade(self):
+        self.enter()
+        self.tick(30, 0.46, 0.48, score="0-1", elapsed="30", period="1H")   # price stop
+        self.tick(55, 0.70, 0.72, score="1-1", elapsed="55", period="2H")   # Chelsea scores
+        t = self.sec["open"][0]
+        self.assertEqual({k: v["rule"] for k, v in t["exits"].items()},
+                         {"price": "price", "price_time": "price", "full": "price", "goal": "goal"})
+        self.assertEqual(t["exit"]["rule"], "price")
+        data = {"games": {}, "candidates": [], "started": [], "error": None, "books": {},
+                "payouts": {"epl-che-bou-2026-10-10:home": 1.0}}
+        t["ended"] = True
+        ms.apply(self.ledger, data, KICKOFF + timedelta(hours=3), TZ)
+        closed = self.sec["closed"][0]
+        v = closed["variant_pnl"]
+        self.assertEqual(v["hold"], closed["hold_pnl"])
+        self.assertEqual(v["full"], closed["strategy_pnl"])
+        self.assertGreater(v["goal"], v["price"])  # sold at 70 after the goal vs 46 on the stop
+        lines = ms.variant_lines(self.sec["closed"])
+        self.assertIn("🔬 مقارنة القواعد على نفس 1 مباراة", lines[0])
+        self.assertIn("الاحتفاظ حتى النهاية", lines[1])  # Chelsea won: holding is best
 
     def test_a_game_without_a_final_whistle_ends_after_4_hours(self):
         self.enter()
