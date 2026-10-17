@@ -461,6 +461,23 @@ def summary_text(ledger, now, title):
     return "\n".join(lines)
 
 
+def public_ledger():
+    """The ledger for /api/paper (the page is public): paper trades, the
+    calibration, the football test and the alert review, without anything
+    that names a wallet (alert times and review keys hold wallet addresses)."""
+    with _lock:
+        if _ledger is None:
+            return None
+        ledger = json.loads(json.dumps(_ledger))
+    ledger.pop("alert_memory", None)
+    ledger.get("match_test", {}).pop("alerted", None)
+    for section in ("open", "closed"):
+        for entry in ledger.get("level_alerts", {}).get(section, []):
+            entry.pop("key", None)
+    ledger["snapshots"] = {"pending": len(ledger.get("snapshots") or {})}
+    return ledger
+
+
 def status_text():
     """Reply to /paper."""
     if not ledger_available():

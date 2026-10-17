@@ -427,6 +427,16 @@ def alerts_status():
     })
 
 
+@app.route("/api/paper")
+def paper_ledger():
+    """The paper-trading ledger, for analysis: no keys, balances or wallet addresses."""
+    import paper_trading
+    ledger = paper_trading.public_ledger()
+    if ledger is None:
+        return jsonify({"error": "the ledger is not loaded yet"}), 503
+    return jsonify(ledger)
+
+
 def start_monitor():
     try:
         from polymarket_monitor import main as monitor_main
