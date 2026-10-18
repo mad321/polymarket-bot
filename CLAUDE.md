@@ -22,7 +22,8 @@ trading results. Add to it when you learn something (see "Lessons" below).
    (Bitcoin model, football hybrid stop-loss, stop-alert review) compare
    results over weeks; changing entry or exit rules mid-way mixes two
    experiments into one meaningless number. Add a new variant instead
-   (see `VARIANTS` in `match_strategy.py`) or start a new section.
+   (see `VARIANTS` in `match_strategy.py`) or start a new section
+   (like `strict_test` in `strict_strategy.py`).
 4. **Money and keys.**
    - The bot only sells, never buys, and only after the owner taps
      "تأكيد البيع" in Telegram. Do not add automatic selling or buying
@@ -37,7 +38,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 5. **Tests before every push**, and they must not touch the network:
 
    ```bash
-   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py
+   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py
    ```
 
    A suite that suddenly takes seconds is calling the internet: mock it.
@@ -53,6 +54,8 @@ trading results. Add to it when you learn something (see "Lessons" below).
 | Selling (bot wallet + optional second wallet) | `trading.py`, `telegram_actions.py` |
 | Ledger loop (every minute), Bitcoin paper model | `paper_trading.py`, ledger stored by `paper_store.py` as a file pinned in Telegram |
 | Football hybrid stop-loss: shadow test + alerts on real positions | `match_strategy.py` |
+| Strategy 3.0 "الميزان الصارم" paper test; ±20% alerts on real positions | `strict_strategy.py` (alerts in `match_strategy.position_alerts`) |
+| Wiping paper trades (archive first, then clear) | `paper_trading.RESET_ID`, `wipe` |
 | Stop/target alert review (sell at alert vs hold) | `stop_review.py` |
 | Position size alert | `exposure.py` |
 | Alert cooldowns kept across restarts | `alert_memory.py` |

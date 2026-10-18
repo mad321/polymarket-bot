@@ -22,9 +22,12 @@ Live score, minute and period come from Polymarket's own event data. Nothing
 here places orders; results go to Telegram (a morning digest, /paper and the
 Friday summary) and live in the pinned ledger, like paper_trading.py.
 
-Alerts on your own positions: the same three rules are applied to every
-"Will <team> win?" Yes position of the watched wallets in these leagues, with
-your average buy price as the entry. Each rule alerts once per position, with
+The same games feed the "strict balance" 3.0 paper test (strict_strategy.py).
+
+Alerts on your own positions follow strategy 3.0 since 2026-10-18 (they
+followed the three rules above before): every "Will <team> win?" Yes position
+of the watched wallets in these leagues alerts when the price reaches +20% or
+falls 20% from your average buy price. Each alerts once per position, with
 what selling every share would pay right then; positions of the bot wallet
 get the sell button. These positions skip the monitor's generic stop-loss /
 take-profit alerts (polymarket_monitor.py), which would contradict them.
@@ -45,6 +48,7 @@ import requests
 
 import positions as positions_module
 import stop_review
+import strict_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +137,7 @@ def alerts_enabled():
 
 
 def active():
-    return enabled() or alerts_enabled()
+    return enabled() or alerts_enabled() or strict_strategy.enabled()
 
 
 def covers(pos):
@@ -298,7 +302,15 @@ def plan(ledger, now):
         if t.get("ended") and now - _settle_checked.get(t["id"], datetime.min.replace(tzinfo=timezone.utc)) >= SETTLE_EVERY:
             settle.append((t["id"], t["market_id"], t["token_id"]))
     entered = {t["slug"] for t in sec["open"] + sec["closed"]}
-    return {"live": live, "settle": settle, "entered": entered}
+    if not enabled():
+        live, settle, entered = {}, [], None
+    if strict_strategy.enabled():
+        strict = strict_strategy.plan(ledger, now)
+        live.update(strict["live"])
+        settle += strict["settle"]
+        # a game is still a candidate while either test has not decided on it
+        entered = strict["entered"] if entered is None else entered & strict["entered"]
+    return {"live": live, "settle": settle, "entered": entered or set()}
 
 
 def fetch(plan_, now):
@@ -308,14 +320,15 @@ def fetch(plan_, now):
     try:
         if _schedule_at is None or now - _schedule_at >= SCHEDULE_EVERY:
             _schedule, _schedule_at = fetch_schedule(now), now
-        candidates = [g for g in _schedule.values() if enabled()
+        testing = enabled() or strict_strategy.enabled()
+        candidates = [g for g in _schedule.values() if testing
                       and g["slug"] not in plan_["entered"] and g["start"] - ENTRY_WINDOW <= now < g["start"]]
         data["candidates"] = [g["slug"] for g in candidates]
-        data["started"] = [g["slug"] for g in _schedule.values() if enabled()
+        data["started"] = [g["slug"] for g in _schedule.values() if testing
                            and g["slug"] not in plan_["entered"] and now - ENTRY_WINDOW <= g["start"] <= now]
         for g in candidates:
             data["games"][g["slug"]] = g
-        live = dict(plan_["live"]) if enabled() else {}
+        live = dict(plan_["live"])
         data["positions"] = _positions_in_play(now)
         for pos in data["positions"]:
             live[pos["_game"]["slug"]] = pos["_game"]["league"]
@@ -451,10 +464,17 @@ def apply(ledger, data, now, tz):
     sec = section(ledger)
     games, books = data["games"], data["books"]
     messages = position_alerts(ledger, data, now) if alerts_enabled() else []
+    if strict_strategy.enabled():
+        strict = strict_strategy.section(ledger)
+        strict_strategy.apply(strict, data, now)
+        messages += strict_strategy.digest(strict, now, tz)
     if not enabled():
         STATE.update(last_scan_at=_iso(now))
         return messages
+    already = {t["slug"] for t in sec["open"] + sec["closed"]}
     for slug in data["candidates"]:
+        if slug in already:
+            continue  # a candidate only for the strict test
         if slug in games:
             game = games[slug]
             vol = game.get("volume", 0)
@@ -500,20 +520,32 @@ def apply(ledger, data, now, tz):
 # ─── ALERTS ON YOUR POSITIONS ────────────────────────────────────────────────
 
 ALERTS_INTRO = (
-    "⚽ تنبيهات الوقف المختلط تعمل الآن على صفقاتك الحقيقية.\n"
+    "🛡️ تنبيهات صفقاتك الحقيقية تتبع الآن الميزان الصارم 3.0.\n"
     "لكل صفقة \"هل سيفوز الفريق؟ نعم\" في الدوريات المختارة، يتابع البوت المباراة كل دقيقة ويرسل تنبيهاً عند: "
-    "نزول السعر 15¢ عن سعر شرائك، أو الدقيقة 65 بلا هدف لفريقك، أو هدف لفريقك. "
-    "كل تنبيه مرة واحدة، ومعه كم ستستلم لو بعت الآن. صفقات محفظة البوت يأتي معها زر البيع.\n"
-    "هذه الصفقات لم تعد تصلها تنبيهات الوقف 30% والهدف 50% القديمة. البوت لا يبيع شيئاً بنفسه."
+    "وصول السعر إلى +20% من سعر شرائك (الهدف)، أو نزوله 20% عنه (الوقف). "
+    "لا تنبيه بالدقيقة 65 ولا عند الهدف بعد الآن.\n"
+    "كل تنبيه مرة واحدة، ومعه كم ستستلم لو بعت الآن. صفقات محفظة البوت يأتي معها زر البيع. "
+    "البوت لا يبيع ولا يضع أوامر بنفسه."
 )
+
+
+def alert_rule(entry, game, mid):
+    """Strategy 3.0 on your position: "target" at +20%, "stop" at -20%, or None."""
+    if not in_play(game) or mid is None or entry <= 0:
+        return None
+    if mid >= entry * (1 + strict_strategy.TARGET) - 1e-9:
+        return "target"
+    if mid <= entry * (1 - strict_strategy.STOP) + 1e-9:
+        return "stop"
+    return None
 
 
 def position_alerts(ledger, data, now):
     """Alerts on your covered positions, each rule once per position."""
     sec = section(ledger)
     messages = []
-    if not sec.get("alerts_intro"):
-        sec["alerts_intro"] = _iso(now)
+    if not sec.get("alerts_intro_v3"):
+        sec["alerts_intro_v3"] = _iso(now)
         messages.append(ALERTS_INTRO)
     sent = sec.setdefault("alerted", {})
     for key, at in list(sent.items()):
@@ -525,8 +557,7 @@ def position_alerts(ledger, data, now):
         if game is None:
             continue
         book = data["books"].get(token) or {}
-        rule = exit_rule({"entry_price": float(pos.get("buy_price") or 0) / 100, "side": pos["_side"]},
-                         game, mid_price(book))
+        rule = alert_rule(float(pos.get("buy_price") or 0) / 100, game, mid_price(book))
         if rule is None:
             continue
         key = f"{pos.get('wallet', '')}:{token}:{rule}"
@@ -548,9 +579,8 @@ def position_alert(pos, game, rule, book):
     m, score = minute(game), game["score"] or "0-0"
     mid = mid_price(book)
     headers = {
-        "price": "🔴 الوقف المختلط: السعر نزل 15¢ عن سعر شرائك",
-        "time": f"⏰ الوقف المختلط: الدقيقة {m} ولم يسجّل {team}",
-        "goal": f"🟢 الوقف المختلط: {team} سجّل، وقت جني الربح",
+        "stop": f"🔴 الميزان الصارم: سعر {team} نزل 20% عن سعر شرائك",
+        "target": f"🟢 الميزان الصارم: سعر {team} وصل +20% فوق سعر شرائك",
     }
     lines = [headers[rule], f"{game['title']}: {score} (الدقيقة {m})",
              f"سعر شرائك {buy:g}¢" + (f"، والسعر الآن {mid * 100:.1f}¢" if mid is not None else "")]
@@ -566,6 +596,9 @@ def position_alert(pos, game, rule, book):
         lines.append("لا يوجد مشترون الآن: حاول بعد قليل.")
     in_bot_wallet = bool(trading.trading_wallet()) and (pos.get("wallet") or "").lower() == trading.trading_wallet()
     lines.append(f"المحفظة: {'محفظة البوت' if in_bot_wallet else 'المحفظة الرئيسية'}")
+    if rule == "target":
+        lines.append("إن كان أمر البيع المحدد عند +20% قائماً فقد يكون نُفّذ: تأكد في بولي ماركت. "
+                     "تذكير: بولي ماركت يمسح الأوامر عند بداية المباراة، فالأمر الموضوع قبلها لم يعد قائماً.")
     lines.append("القاعدة تقول: بِع. القرار لك، فالاستراتيجية ما زالت قيد الاختبار.")
     if not in_bot_wallet and pos.get("url"):
         lines.append(pos["url"])

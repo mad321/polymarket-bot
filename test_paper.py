@@ -16,6 +16,7 @@ from unittest import mock
 os.environ["ENABLE_MONITOR"] = "0"
 os.environ["MATCH_TEST"] = "0"    # the football test and alerts have their own tests (test_match.py)
 os.environ["MATCH_ALERTS"] = "0"
+os.environ["STRICT_TEST"] = "0"   # strategy 3.0 has its own tests (test_strict.py)
 
 import paper_store
 import paper_trading as pt
