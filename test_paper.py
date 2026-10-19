@@ -16,6 +16,7 @@ from unittest import mock
 os.environ["ENABLE_MONITOR"] = "0"
 os.environ["MATCH_TEST"] = "0"    # the football test and alerts have their own tests (test_match.py)
 os.environ["MATCH_ALERTS"] = "0"
+os.environ["STRICT_TEST"] = "0"   # strategy 3.0 has its own tests (test_strict.py)
 
 import paper_store
 import paper_trading as pt
@@ -497,6 +498,32 @@ class StopReviewTests(unittest.TestCase):
         self.assertEqual(send.call_count, 1)
         self.assertEqual(rec.call_count, 2)
         rec.assert_called_with(pos, "stop_loss", 28.0)
+
+
+class PublicLedgerTests(unittest.TestCase):
+    def tearDown(self):
+        pt._ledger = None
+
+    def test_api_paper_hides_wallets_and_keeps_the_trades(self):
+        import polymarket_bot
+        client = polymarket_bot.app.test_client()
+        pt._ledger = None
+        self.assertEqual(client.get("/api/paper").status_code, 503)
+        ledger = pt.new_ledger(NOW)
+        wallet = "0x0c4526398bba16e31f23ca818d767cb00b02921c"
+        ledger["closed"].append({"id": "t1", "pnl": 1.5})
+        ledger["alert_memory"] = {"next_alert_at": {f"{wallet}:1": 5}, "exposure_sent": {}}
+        ledger["level_alerts"]["closed"].append({"key": f"{wallet}:1:stop_loss", "name": "x", "sold_value": 2})
+        ledger["match_test"] = {"open": [], "closed": [{"id": "m1"}], "alerted": {f"{wallet}:1:price": "t"}}
+        ledger["snapshots"] = {"1": {}, "2": {}}
+        pt._ledger = ledger
+        body = client.get("/api/paper").get_json()
+        self.assertNotIn(wallet, json.dumps(body))
+        self.assertEqual(body["closed"], [{"id": "t1", "pnl": 1.5}])
+        self.assertEqual(body["match_test"]["closed"], [{"id": "m1"}])
+        self.assertEqual(body["level_alerts"]["closed"], [{"name": "x", "sold_value": 2}])
+        self.assertEqual(body["snapshots"], {"pending": 2})
+        self.assertIn("alert_memory", pt._ledger)  # the live ledger is untouched
 
 
 if __name__ == "__main__":

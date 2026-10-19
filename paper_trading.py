@@ -51,6 +51,7 @@ import alerts
 import match_strategy
 import paper_store
 import stop_review
+import strict_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,11 @@ _lock = threading.Lock()
 _ledger = None
 _review_checked = {}  # market id -> last resolution check (epoch seconds)
 _last_bitcoin_scan = None
+
+# The paper trades were wiped on the owner's request when strategy 3.0 began.
+# A ledger with another reset id is archived (sent to Telegram as its own
+# file) and its paper trades cleared once; change the id to wipe again.
+RESET_ID = "2026-10-18 strategy 3.0"
 
 
 def ledger_available():
@@ -261,10 +267,30 @@ def new_ledger(now):
         "best_edge": None,
         "last_summary_at": _iso(now),
         "summary_week": None,
+        "reset_id": RESET_ID,
     }
     if summary_due(ledger, now):  # started after this week's summary time
         ledger["summary_week"] = _week(now)
     return ledger
+
+
+def wipe(ledger, now):
+    """Clears the paper trades: the Bitcoin trades and the football test. The
+    alert review (real alerts), the alert times and the model-vs-market
+    accuracy are kept."""
+    ledger.update(started_at=_iso(now), open=[], closed=[], best_edge=None,
+                  last_summary_at=_iso(now), reset_id=RESET_ID)
+    old = ledger.pop("match_test", None) or {}
+    keep = {k: old[k] for k in ("alerted", "alerts_intro", "alerts_intro_v3") if k in old}
+    if keep:
+        ledger["match_test"] = {"open": [], "closed": [], "skipped": 0, "digest_day": None,
+                                "last_digest_at": None, **keep}
+    ledger.pop("strict_test", None)
+
+
+WIPED = ("🧹 مُسحت الصفقات الورقية: صفقات البيتكوين واختبار الوقف المختلط. "
+         "نسخة كاملة من السجل القديم في الملف أعلاه ({name}): احتفظ بها إن أردت الرجوع إليها.\n"
+         "بقيت كما هي: مراجعة تنبيهات الوقف على صفقاتك الحقيقية، وقياس دقة نموذج البيتكوين.")
 
 
 def _week(now):
@@ -432,6 +458,8 @@ def summary_text(ledger, now, title):
     if not enabled():
         lines = [f"📒 {title}", "التداول على الورق متوقف (PAPER_TRADING=0)."]
         lines += stop_review.summary_lines(ledger) or ["لا توجد تنبيهات مسجلة للمراجعة بعد."]
+        if "strict_test" in ledger:
+            lines += strict_strategy.summary_lines(ledger)
         if "match_test" in ledger:
             lines += match_strategy.summary_lines(ledger)
         return "\n".join(lines)
@@ -455,10 +483,29 @@ def summary_text(ledger, now, title):
         lines.append(f"أكبر فارق رآه النموذج: {best['edge'] * 100:.1f} نقطة "
                      f"({SIDES[best['side']]} في {best['name']})، والحد المطلوب للشراء {MIN_EDGE * 100:.0f} نقاط")
     lines += stop_review.summary_lines(ledger)
+    if "strict_test" in ledger:
+        lines += strict_strategy.summary_lines(ledger)
     if "match_test" in ledger:
         lines += match_strategy.summary_lines(ledger)
     lines.append("⚠️ الحكم يحتاج 4 أسابيع و30 صفقة محسومة على الأقل: نتيجة أسبوع واحد قد تكون حظاً.")
     return "\n".join(lines)
+
+
+def public_ledger():
+    """The ledger for /api/paper (the page is public): paper trades, the
+    calibration, the football test and the alert review, without anything
+    that names a wallet (alert times and review keys hold wallet addresses)."""
+    with _lock:
+        if _ledger is None:
+            return None
+        ledger = json.loads(json.dumps(_ledger))
+    ledger.pop("alert_memory", None)
+    ledger.get("match_test", {}).pop("alerted", None)
+    for section in ("open", "closed"):
+        for entry in ledger.get("level_alerts", {}).get(section, []):
+            entry.pop("key", None)
+    ledger["snapshots"] = {"pending": len(ledger.get("snapshots") or {})}
+    return ledger
 
 
 def status_text():
@@ -505,6 +552,7 @@ def scan_once(ledger, now=None):
         before = json.dumps(ledger, sort_keys=True)
         new_review = "level_alerts" not in ledger  # a ledger from before the review existed
         new_matches = match_strategy.enabled() and "match_test" not in ledger
+        new_strict = strict_strategy.enabled() and "strict_test" not in ledger
         stop_review.merge(ledger)
         due = due_market_ids(ledger, now) if paper else set()
         review = stop_review.open_entries(ledger)
@@ -537,6 +585,9 @@ def scan_once(ledger, now=None):
         messages = [REVIEW_INTRO] if new_review else []
         if new_matches:
             messages.append(match_strategy.intro())
+        if new_strict:
+            strict_strategy.section(ledger)
+            messages.append(strict_strategy.intro())
         messages += stop_review.settle(ledger, payouts, _iso(now))
         if match_data:
             messages += match_strategy.apply(ledger, match_data, now, TZ)
@@ -587,6 +638,13 @@ def run_forever():
                 if ledger is None:
                     ledger, dirty = new_ledger(datetime.now(timezone.utc)), True
                     alerts.send_alert(INTRO.format(stake=STAKE, edge=MIN_EDGE * 100))
+                elif ledger.get("reset_id") != RESET_ID:
+                    now = datetime.now(timezone.utc)
+                    name = f"paper_trades_before_{now:%Y%m%d}.json"
+                    store.archive(ledger, name)  # raises if it fails: nothing is wiped without a copy
+                    wipe(ledger, now)
+                    dirty = True
+                    alerts.send_alert(WIPED.format(name=name))
                 alert_memory.restore(ledger.get("alert_memory"))
                 with _lock:
                     _ledger = ledger

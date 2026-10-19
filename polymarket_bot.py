@@ -412,6 +412,7 @@ def alerts_status():
     import alerts
     import exposure
     import match_strategy
+    import strict_strategy
     import paper_trading
     import telegram_actions
     import trading
@@ -424,7 +425,18 @@ def alerts_status():
         "paper_trading": paper_trading.STATE,
         "position_size": exposure.STATE,
         "match_test": match_strategy.STATE,
+        "strict_test": {**strict_strategy.STATE, "enabled": strict_strategy.enabled()},
     })
+
+
+@app.route("/api/paper")
+def paper_ledger():
+    """The paper-trading ledger, for analysis: no keys, balances or wallet addresses."""
+    import paper_trading
+    ledger = paper_trading.public_ledger()
+    if ledger is None:
+        return jsonify({"error": "the ledger is not loaded yet"}), 503
+    return jsonify(ledger)
 
 
 def start_monitor():

@@ -24,6 +24,8 @@ FILE_NAME = "paper_trades.json"
 CAPTION = ("📒 سجل التداول على الورق (بدون مال حقيقي). "
            "لا تحذف هذه الرسالة ولا تلغِ تثبيتها: البوت يحفظ فيها صفقاته الورقية.")
 
+ARCHIVE_CAPTION = "🗄️ نسخة من سجل التداول على الورق قبل مسحه. البوت لا يقرأ هذا الملف."
+
 
 class StoreError(Exception):
     """The ledger could not be read or written. Never contains the bot token."""
@@ -45,6 +47,11 @@ class FileStore:
                 return json.load(f)
         except (OSError, ValueError) as e:
             raise StoreError(f"cannot read {self.path}: {e}") from None
+
+    def archive(self, ledger, name):
+        """A copy of the ledger next to it, kept as it is."""
+        with open(os.path.join(os.path.dirname(self.path) or ".", name), "w", encoding="utf-8") as f:
+            json.dump(ledger, f, ensure_ascii=False, indent=1)
 
     def save(self, ledger):
         tmp = f"{self.path}.tmp"
@@ -102,6 +109,13 @@ class TelegramStore:
             raise StoreError(error.replace(token, "***") if token else error) from None
         self.message_id, self.pinned = pinned["message_id"], True
         return ledger
+
+    def archive(self, ledger, name):
+        """A copy of the ledger as its own message (not pinned, never edited)."""
+        content = json.dumps(ledger, ensure_ascii=False, indent=1).encode()
+        self._call("sendDocument",
+                   {"chat_id": self._chat_id(), "caption": ARCHIVE_CAPTION, "disable_notification": "true"},
+                   {"document": (name, content, "application/json")})
 
     def save(self, ledger):
         content = json.dumps(ledger, ensure_ascii=False, indent=1).encode()
