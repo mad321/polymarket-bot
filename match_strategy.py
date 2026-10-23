@@ -472,7 +472,7 @@ def apply(ledger, data, now, tz):
     messages = position_alerts(ledger, data, now) if alerts_enabled() else []
     if strict_strategy.enabled():
         strict = strict_strategy.section(ledger)
-        strict_strategy.apply(strict, data, now)
+        messages += strict_strategy.apply(strict, data, now)  # buy signals
         messages += strict_strategy.digest(strict, now, tz)
     if not enabled():
         STATE.update(last_scan_at=_iso(now))

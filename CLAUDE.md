@@ -58,7 +58,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 | Selling (bot wallet + optional second wallet) | `trading.py`, `telegram_actions.py` |
 | Ledger loop (every minute), Bitcoin paper model | `paper_trading.py`, ledger stored by `paper_store.py` as a file pinned in Telegram |
 | Football hybrid stop-loss: shadow test + alerts on real positions | `match_strategy.py` |
-| Strategy 3.0 "الميزان الصارم" paper test; ±20% alerts on real positions | `strict_strategy.py` (alerts in `match_strategy.position_alerts`) |
+| Strategy 3.0 "الميزان الصارم" paper test; ±20% alerts on real positions; buy signals (`BUY_SIGNALS=0` off) | `strict_strategy.py` (alerts in `match_strategy.position_alerts`) |
 | Automatic sale at the stop-loss (`AUTO_STOP=1`) | `auto_stop.py` |
 | Live prices and scores (WebSockets): instant stops, goal-vs-price timing | `live_feed.py` (`LIVE_FEED=0` turns it off) |
 | Wiping paper trades (archive first, then clear) | `paper_trading.RESET_ID`, `wipe` |
