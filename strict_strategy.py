@@ -33,6 +33,9 @@ no strategy is proven yet); after the purchase, auto_stop.py sells at −20%.
 Settings:
   STRICT_TEST=0   turn the test off (and the buy signals with it)
   BUY_SIGNALS=0   keep the test but send no buy signals
+  SIGNAL_PCT      size of a suggested buy, in percent of the watched wallets'
+                  value (cash + open positions) at the time (default 3). The
+                  paper test keeps its fixed $25.
   STRICT_STAKE    virtual dollars per trade (default 25)
   STRICT_TEAMS    comma-separated team names replacing the elite list
 """
@@ -204,15 +207,30 @@ def signals_enabled():
     return (os.environ.get("BUY_SIGNALS") or "").strip() != "0"
 
 
-def signal(trade, game, settled, now):
-    """The Telegram suggestion to buy what the paper test just bought."""
+def signal_pct():
+    try:
+        return float(os.environ.get("SIGNAL_PCT") or 3)
+    except ValueError:
+        return 3.0
+
+
+def signal(trade, game, settled, now, capital=None):
+    """The Telegram suggestion to buy what the paper test just bought, sized
+    at signal_pct() of the wallets' value (the paper stake when unknown)."""
     minutes = max(0, round((game["start"] - now).total_seconds() / 60))
+    if capital:
+        amount = round(capital * signal_pct() / 100, 2)
+        size = f"${amount:.2f} ({signal_pct():g}% من قيمة محفظتك ${capital:,.2f})"
+    else:
+        amount = stake()
+        size = f"${amount:g} (تعذّرت قراءة قيمة محفظتك الآن)"
+    shares = amount / trade["entry_price"]
     return "\n".join([
         "🟢 فرصة شراء: الميزان الصارم 3.0",
         f"{trade['title']}: تبدأ بعد {minutes} دقيقة",
         f"الفريق: {trade['team']}، السعر الآن حوالي {trade['entry_price'] * 100:.1f}¢ "
         f"(حجم تداول المباراة ${trade['volume']:,.0f})",
-        f"اشترِ \"نعم\" بـ ${stake():g}، أي حوالي {trade['shares']:g} سهم.",
+        f"اشترِ \"نعم\" بـ {size}، أي حوالي {shares:.0f} سهم.",
         f"بعد الشراء: البوت يبيع تلقائياً إن نزل السعر إلى {trade['stop'] * 100:.1f}¢ (−20%)، "
         f"ويرسل لك زر البيع عند {trade['target'] * 100:.1f}¢ (+20%).",
         f"⚠️ الاستراتيجية ما زالت تحت الاختبار: {settled} صفقة محسومة، والحكم بعد 30. القرار لك.",
@@ -227,7 +245,7 @@ def apply(sec, data, now):
     messages = []
     for slug in data.get("candidates", []):
         if slug in games and enter(sec, games[slug], books, now) and signals_enabled():
-            messages.append(signal(sec["open"][-1], games[slug], len(sec["closed"]), now))
+            messages.append(signal(sec["open"][-1], games[slug], len(sec["closed"]), now, data.get("capital")))
     for slug in data.get("started", []):
         game = ms._schedule.get(slug)
         if game:

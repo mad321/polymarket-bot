@@ -114,3 +114,24 @@ class ExposureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CapitalTests(unittest.TestCase):
+    def setUp(self):
+        exposure._capital.update(at=0.0, value=None)
+        self.addCleanup(exposure._capital.update, at=0.0, value=None)
+
+    def test_cash_plus_positions_cached_for_ten_minutes(self):
+        rows = [{"shares": 40, "current_price": 50.0}, {"shares": 10, "current_price": 20.0}]
+        with mock.patch("exposure.positions_module.load_positions", return_value=(rows, "wallet", None)), \
+                mock.patch("exposure.positions_module.watched_wallets", return_value=["0xa", "0xb"]), \
+                mock.patch("exposure.wallet_cash", side_effect=[100.0, 50.0]) as cash:
+            self.assertEqual(exposure.capital(now=1000), 172.0)
+            self.assertEqual(exposure.capital(now=1500), 172.0)
+        self.assertEqual(cash.call_count, 2)
+
+    def test_unknown_when_the_wallet_cannot_be_read(self):
+        with mock.patch("exposure.positions_module.load_positions", return_value=([], "config", "down")):
+            self.assertIsNone(exposure.capital(now=1000))
+        with mock.patch("exposure.positions_module.load_positions", side_effect=ConnectionError("x")):
+            self.assertIsNone(exposure.capital(now=1000))

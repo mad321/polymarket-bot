@@ -327,6 +327,9 @@ def fetch(plan_, now):
         candidates = [g for g in _schedule.values() if testing
                       and g["slug"] not in plan_["entered"] and g["start"] - ENTRY_WINDOW <= now < g["start"]]
         data["candidates"] = [g["slug"] for g in candidates]
+        if candidates and strict_strategy.enabled() and strict_strategy.signals_enabled():
+            import exposure
+            data["capital"] = exposure.capital()  # sizes the buy signals
         data["started"] = [g["slug"] for g in _schedule.values() if testing
                            and g["slug"] not in plan_["entered"] and now - ENTRY_WINDOW <= g["start"] <= now]
         for g in candidates:

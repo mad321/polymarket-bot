@@ -60,6 +60,28 @@ def wallet_cash(address):
     return int(body["result"], 16) / 1e6
 
 
+_capital = {"at": 0.0, "value": None}
+
+
+def capital(max_age=600, now=None):
+    """Cash + open positions of the watched wallets, in dollars (cached for
+    max_age seconds), or None when it cannot be read. Used to size the buy
+    signals; never shown on a public page."""
+    now = now or time.time()
+    if _capital["value"] is not None and now - _capital["at"] < max_age:
+        return _capital["value"]
+    try:
+        rows, source, _ = positions_module.load_positions()
+        if source != "wallet":
+            return None
+        total = sum(wallet_cash(w) for w in positions_module.watched_wallets()) + sum(value(p) for p in rows)
+    except Exception as e:
+        logger.warning(f"[EXPOSURE] reading capital: {type(e).__name__}: {e}"[:300])
+        return None
+    _capital.update(at=now, value=total)
+    return total
+
+
 def value(pos):
     return float(pos.get("shares") or 0) * float(pos.get("current_price") or 0) / 100
 
