@@ -230,6 +230,40 @@ class StrictTests(unittest.TestCase):
         self.assertEqual(msgs2, [])
 
 
+class DashboardTests(unittest.TestCase):
+    def ledger(self):
+        import json
+        with open(pt.RESTORE_FILE, encoding="utf-8") as f:
+            saved = json.load(f)
+        ledger = pt.new_ledger(KICKOFF)
+        ledger["strict_test"] = saved["strict_test"]
+        return ledger
+
+    def test_figures_from_the_four_restored_trades(self):
+        d = st.dashboard(self.ledger()["strict_test"])
+        self.assertEqual((d["settled"], d["wins"], d["targets"], d["stops"], d["held"]), (4, 2, 2, 2, 0))
+        self.assertAlmostEqual(d["pnl"], -5.6468, places=3)
+        self.assertAlmostEqual(d["hold"], 57.7859, places=3)
+        self.assertEqual(d["win_rate"], 50)
+        self.assertTrue(d["rows"][-1]["exit"].startswith("🛑 وقف · د"))
+        self.assertEqual(st.dashboard({})["win_rate"], None)
+
+    def test_the_home_page_shows_the_section(self):
+        import polymarket_bot
+        pt._ledger = self.ledger()
+        self.addCleanup(setattr, pt, "_ledger", None)
+        with mock.patch("polymarket_bot.load_positions", return_value=([], "wallet", None)):
+            html = polymarket_bot.app.test_client().get("/").get_data(as_text=True)
+        self.assertIn("الميزان الصارم 3.0", html)
+        self.assertIn("الحكم يحتاج 30 صفقة", html)
+        self.assertIn("Liverpool FC vs. Villarreal CF", html)
+        self.assertIn("الاحتفاظ أفضل بـ", html)
+        pt._ledger = None
+        with mock.patch("polymarket_bot.load_positions", return_value=([], "wallet", None)):
+            html = polymarket_bot.app.test_client().get("/").get_data(as_text=True)
+        self.assertIn("البوت ما زال يحمّل سجل التجربة", html)
+
+
 class WipeTests(unittest.TestCase):
     def old_ledger(self):
         ledger = pt.new_ledger(KICKOFF - timedelta(days=10))

@@ -204,8 +204,19 @@ DASHBOARD_TEMPLATE = """
         }
         .refresh-btn:hover { transform: translateY(-1px); opacity: .92; }
 
+        /* Strategy 3.0 paper test */
+        .strict { margin-top: 36px; }
+        .strict .summary { grid-template-columns: repeat(3, 1fr); }
+        .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+        .table-wrap table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 0.88em; }
+        .table-wrap th { color: var(--muted); font-weight: 600; text-align: start; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+        .table-wrap td { padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        .table-wrap tr:last-child td { border-bottom: none; }
+        .tag { display: inline-block; margin-inline-start: 6px; padding: 1px 8px; border-radius: 999px; font-size: 0.75em; color: var(--blue); border: 1px solid rgba(76,201,240,0.4); }
+        .warn { margin-bottom: 14px; padding: 12px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); color: var(--amber); font-size: 0.9em; }
+
         @media (max-width: 820px) {
-            .summary { grid-template-columns: repeat(2, 1fr); }
+            .summary, .strict .summary { grid-template-columns: repeat(2, 1fr); }
             .grid { grid-template-columns: 1fr; }
         }
         @media (max-width: 420px) {
@@ -323,6 +334,56 @@ DASHBOARD_TEMPLATE = """
     </div>
     {% endif %}
 
+    <section class="strict">
+        <div class="section-title">
+            <h2>🛡️ الميزان الصارم 3.0 · تجربة على الورق</h2>
+            <span>بدون مال حقيقي · $25 للصفقة · 55–72¢ · بيع عند +20% أو −20%</span>
+        </div>
+        {% if strict is none %}
+        <div class="warn">البوت ما زال يحمّل سجل التجربة، حدّث الصفحة بعد دقيقة.</div>
+        {% else %}
+        {% if strict.settled < 30 %}<div class="warn">⚠️ <span class="num">{{ strict.settled }}</span> صفقة فقط: الحكم يحتاج 30 صفقة محسومة على الأقل.</div>{% endif %}
+        <div class="summary">
+            <div class="kpi"><div class="lbl">صفقات محسومة</div><div class="val num">{{ strict.settled }}</div>
+                <div class="sub">{% if strict.open %}و {{ strict.open }} جارية{% else %}لا صفقات جارية{% endif %}</div></div>
+            <div class="kpi"><div class="lbl">نسبة الربح</div>
+                <div class="val num {% if strict.win_rate is not none %}{% if strict.win_rate >= strict.break_even %}pos{% else %}neg{% endif %}{% endif %}">{% if strict.win_rate is none %}—{% else %}{{ "%.0f"|format(strict.win_rate) }}%{% endif %}</div>
+                <div class="sub">المطلوب {{ "%.0f"|format(strict.goal) }}% · التعادل ≈{{ strict.break_even }}%</div></div>
+            <div class="kpi"><div class="lbl">الصافي</div>
+                <div class="val num {% if strict.pnl >= 0 %}pos{% else %}neg{% endif %}">{% if strict.pnl >= 0 %}+${{ "%.2f"|format(strict.pnl) }}{% else %}-${{ "%.2f"|format(-strict.pnl) }}{% endif %}</div>
+                <div class="sub num">{% if strict.pnl_pct is not none %}{{ "%+.1f"|format(strict.pnl_pct) }}%{% endif %}</div></div>
+            <div class="kpi"><div class="lbl">لو احتفظت حتى النهاية</div>
+                <div class="val num {% if strict.hold >= 0 %}pos{% else %}neg{% endif %}">{% if strict.hold >= 0 %}+${{ "%.2f"|format(strict.hold) }}{% else %}-${{ "%.2f"|format(-strict.hold) }}{% endif %}</div>
+                <div class="sub">{% if strict.settled %}{% if strict.pnl > strict.hold %}الاستراتيجية أفضل بـ <span class="num">${{ "%.2f"|format(strict.pnl - strict.hold) }}</span>{% elif strict.pnl < strict.hold %}الاحتفاظ أفضل بـ <span class="num">${{ "%.2f"|format(strict.hold - strict.pnl) }}</span>{% else %}لا فرق{% endif %}{% endif %}</div></div>
+            <div class="kpi"><div class="lbl">طريقة الخروج</div>
+                <div class="val" style="font-size:1.2em">🎯 <span class="num">{{ strict.targets }}</span> · 🛑 <span class="num">{{ strict.stops }}</span> · ⏱️ <span class="num">{{ strict.held }}</span></div>
+                <div class="sub">هدف +20% · وقف −20% · حتى النهاية</div></div>
+            <div class="kpi"><div class="lbl">مباريات تُركت</div><div class="val num">{{ strict.skipped_volume + strict.skipped_price }}</div>
+                <div class="sub">حجم أقل من <span class="num">$15,000</span>: {{ strict.skipped_volume }} · سعر خارج <span class="num">55–72¢</span>: {{ strict.skipped_price }}</div></div>
+        </div>
+        <div class="table-wrap">
+            {% if strict.rows %}
+            <table>
+                <thead><tr><th>المباراة</th><th>الفريق</th><th>الدخول</th><th>الخروج</th><th>فاز الفريق؟</th><th>الربح</th><th>لو احتفظت</th></tr></thead>
+                <tbody>
+                {% for r in strict.rows %}
+                <tr>
+                    <td><bdi>{{ r.title }}</bdi>{% if r.open %}<span class="tag">جارية</span>{% endif %}</td>
+                    <td><bdi>{{ r.team }}</bdi></td>
+                    <td class="num">{{ "%.0f"|format(r.entry) }}¢</td>
+                    <td>{{ r.exit }}</td>
+                    <td>{% if r.won is none %}—{% elif r.won %}✅{% else %}❌{% endif %}</td>
+                    <td class="num {% if r.pnl is not none %}{% if r.pnl >= 0 %}pos{% else %}neg{% endif %}{% endif %}">{% if r.pnl is none %}—{% elif r.pnl >= 0 %}+${{ "%.2f"|format(r.pnl) }}{% else %}-${{ "%.2f"|format(-r.pnl) }}{% endif %}</td>
+                    <td class="num {% if r.hold is not none %}{% if r.hold >= 0 %}pos{% else %}neg{% endif %}{% endif %}">{% if r.hold is none %}—{% elif r.hold >= 0 %}+${{ "%.2f"|format(r.hold) }}{% else %}-${{ "%.2f"|format(-r.hold) }}{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}<div class="empty" style="border:none">لا توجد صفقات ورقية بعد.</div>{% endif %}
+        </div>
+        {% endif %}
+    </section>
+
     <footer class="footer">
         <button class="refresh-btn" onclick="location.reload()">🔄 تحديث الأسعار</button>
     </footer>
@@ -382,8 +443,19 @@ def home():
         total_pnl_usd=round(total_value - total_cost, 2),
         winners=sum(1 for p in positions if p["status"] == "profit"),
         losers=sum(1 for p in positions if p["status"] == "loss"),
-        last_update=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        last_update=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        strict=_strict_figures(),
     )
+
+
+def _strict_figures():
+    """Strategy 3.0 paper results for the page, or None until the ledger is loaded."""
+    import paper_trading
+    import strict_strategy
+    ledger = paper_trading.public_ledger()
+    if ledger is None:
+        return None
+    return strict_strategy.dashboard(ledger.get("strict_test") or {})
 
 
 @app.route("/api/positions")

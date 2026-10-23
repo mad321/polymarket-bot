@@ -341,6 +341,36 @@ def digest(sec, now, tz):
                       + results_lines(new))]
 
 
+def dashboard(sec):
+    """The figures of the bot's own dashboard page (no wallet data)."""
+    closed = sec.get("closed", [])
+    paid = sum(t["cost"] + t["fee"] for t in closed)
+    pnl = sum(t.get("pnl", 0) for t in closed)
+    hold = sum(t.get("hold_pnl", 0) for t in closed)
+    wins = sum(t.get("pnl", 0) > 0 for t in closed)
+    rows = []
+    for t, is_open in ([(t, True) for t in sorted(sec.get("open", []), key=lambda t: t["start"], reverse=True)]
+                       + [(t, False) for t in sorted(closed, key=lambda t: t.get("closed_at", ""), reverse=True)]):
+        ex = t.get("exit") or {}
+        exit_text = ("🎯 هدف" if ex.get("rule") == "target" else
+                     f"🛑 وقف · د{ex.get('minute')} · {str(ex.get('score') or '').split('|')[0]}" if ex.get("rule") == "stop"
+                     else "—" if is_open else "حتى النهاية")
+        payout = t.get("payout")
+        rows.append({"title": t["title"], "team": t["team"], "entry": t["entry_price"] * 100, "exit": exit_text,
+                     "won": None if payout is None else payout >= 1, "pnl": t.get("pnl"),
+                     "hold": t.get("hold_pnl"), "open": is_open})
+    skipped = sec.get("skipped") or {}
+    return {"settled": len(closed), "open": len(sec.get("open", [])), "wins": wins,
+            "win_rate": wins / len(closed) * 100 if closed else None,
+            "pnl": pnl, "pnl_pct": pnl / paid * 100 if paid else None,
+            "hold": hold, "hold_pct": hold / paid * 100 if paid else None,
+            "targets": sum((t.get("exit") or {}).get("rule") == "target" for t in closed),
+            "stops": sum((t.get("exit") or {}).get("rule") == "stop" for t in closed),
+            "held": sum("exit" not in t for t in closed),
+            "skipped_volume": skipped.get("volume", 0), "skipped_price": skipped.get("price", 0),
+            "goal": WIN_RATE_GOAL * 100, "break_even": 57, "rows": rows}
+
+
 def summary_lines(ledger):
     sec = section(ledger)
     skipped = sec["skipped"]
