@@ -75,6 +75,40 @@ class StrictTests(unittest.TestCase):
         self.assertEqual((t["target"], t["stop"]), (0.744, 0.496))
         self.assertEqual(self.ledger["match_test"]["open"], [])  # the hybrid test is off here
 
+    def test_an_entry_is_sent_as_a_buy_signal_once(self):
+        data = {"games": {SLUG: game()}, "candidates": [SLUG], "started": [], "payouts": {}, "error": None,
+                "books": {"yH": book(0.61, 0.62), "yA": book(0.14, 0.15)}}
+        msgs = ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ)
+        self.assertEqual(len(msgs), 1)
+        text = msgs[0]
+        self.assertIn("🟢 فرصة شراء: الميزان الصارم 3.0", text)
+        self.assertIn("Chelsea FC vs. AFC Bournemouth: تبدأ بعد 12 دقيقة", text)
+        self.assertIn("السعر الآن حوالي 62.0¢", text)
+        self.assertIn("بـ $25 (تعذّرت قراءة قيمة محفظتك الآن)، أي حوالي 40 سهم", text)
+        self.assertIn("إن نزل السعر إلى 49.6¢ (−20%)", text)
+        self.assertIn("عند 74.4¢ (+20%)", text)
+        self.assertIn("0 صفقة محسومة، والحكم بعد 30", text)
+        self.assertIn("https://polymarket.com/event/" + SLUG, text)
+        self.assertEqual(ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=11), TZ), [])
+
+    def test_the_signal_is_sized_at_3_percent_of_the_wallets(self):
+        data = {"games": {SLUG: game()}, "candidates": [SLUG], "started": [], "payouts": {}, "error": None,
+                "books": {"yH": book(0.61, 0.62), "yA": book(0.14, 0.15)}, "capital": 1240.0}
+        [text] = ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ)
+        self.assertIn("بـ $37.20 (3% من قيمة محفظتك $1,240.00)، أي حوالي 60 سهم", text)
+        self.assertEqual(self.sec["open"][0]["shares"], 40.32)  # the paper test keeps $25
+        with mock.patch.dict(os.environ, {"SIGNAL_PCT": "2"}):
+            self.assertIn("$24.80 (2% من", st.signal(self.sec["open"][0], game(), 0, KICKOFF, 1240.0))
+
+    def test_no_signal_when_signals_are_off_or_nothing_is_bought(self):
+        data = {"games": {SLUG: game()}, "candidates": [SLUG], "started": [], "payouts": {}, "error": None,
+                "books": {"yH": book(0.75, 0.76), "yA": book(0.14, 0.15)}}
+        self.assertEqual(ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ), [])  # 76c: out of range
+        data["books"]["yH"] = book(0.61, 0.62)
+        with mock.patch.dict(os.environ, {"BUY_SIGNALS": "0"}):
+            self.assertEqual(ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=11), TZ), [])
+        self.assertEqual(len(self.sec["open"]), 1)  # the paper test still bought
+
     def test_no_entry_above_72_cents_and_the_miss_is_counted_at_kickoff(self):
         self.assertIsNone(self.enter(home_ask=0.74))
         self.assertIsNone(self.enter(home_ask=0.62 + 0.11, minutes=5))

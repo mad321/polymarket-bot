@@ -327,6 +327,9 @@ def fetch(plan_, now):
         candidates = [g for g in _schedule.values() if testing
                       and g["slug"] not in plan_["entered"] and g["start"] - ENTRY_WINDOW <= now < g["start"]]
         data["candidates"] = [g["slug"] for g in candidates]
+        if candidates and strict_strategy.enabled() and strict_strategy.signals_enabled():
+            import exposure
+            data["capital"] = exposure.capital()  # sizes the buy signals
         data["started"] = [g["slug"] for g in _schedule.values() if testing
                            and g["slug"] not in plan_["entered"] and now - ENTRY_WINDOW <= g["start"] <= now]
         for g in candidates:
@@ -472,7 +475,7 @@ def apply(ledger, data, now, tz):
     messages = position_alerts(ledger, data, now) if alerts_enabled() else []
     if strict_strategy.enabled():
         strict = strict_strategy.section(ledger)
-        strict_strategy.apply(strict, data, now)
+        messages += strict_strategy.apply(strict, data, now)  # buy signals
         messages += strict_strategy.digest(strict, now, tz)
     if not enabled():
         STATE.update(last_scan_at=_iso(now))
