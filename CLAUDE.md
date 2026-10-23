@@ -42,7 +42,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 5. **Tests before every push**, and they must not touch the network:
 
    ```bash
-   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py test_auto_stop.py
+   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py test_auto_stop.py test_restore.py
    ```
 
    A suite that suddenly takes seconds is calling the internet: mock it.
@@ -61,6 +61,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 | Strategy 3.0 "الميزان الصارم" paper test; ±20% alerts on real positions | `strict_strategy.py` (alerts in `match_strategy.position_alerts`) |
 | Automatic sale at the stop-loss (`AUTO_STOP=1`) | `auto_stop.py` |
 | Wiping paper trades (archive first, then clear) | `paper_trading.RESET_ID`, `wipe` |
+| Restoring the ledger lost on Oct 23 (once) | `paper_trading.restore`, `restore/` |
 | Stop/target alert review (sell at alert vs hold) | `stop_review.py` |
 | Position size alert | `exposure.py` |
 | Alert cooldowns kept across restarts | `alert_memory.py` |

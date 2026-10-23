@@ -329,7 +329,7 @@ class RunLoopTests(unittest.TestCase):
         return send
 
     def test_new_ledger_is_announced_and_saved(self):
-        store = mock.Mock(describe=lambda: "mock")
+        store = mock.Mock(describe=lambda: "mock", missing=None)  # a first start: nothing was pinned before
         store.load.return_value = None
         send = self.run_once(store)
         self.assertIn("بدأ التداول على الورق", send.call_args_list[0].args[0])
