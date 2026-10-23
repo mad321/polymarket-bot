@@ -114,6 +114,12 @@ _last_bitcoin_scan = None
 # file) and its paper trades cleared once; change the id to wipe again.
 RESET_ID = "2026-10-18 strategy 3.0"
 
+# On 2026-10-23 a restart did not find the pinned ledger and started an empty
+# one. RESTORE_FILE is the public copy of /api/paper taken 8 minutes before;
+# it is merged once into whatever ledger is loaded (restored_id marks it).
+RESTORE_ID = "2026-10-23"
+RESTORE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "restore", "paper_trades_2026-10-23.json")
+
 
 def ledger_available():
     """Somewhere to keep the ledger: the ledger loop runs only then."""
@@ -268,6 +274,7 @@ def new_ledger(now):
         "last_summary_at": _iso(now),
         "summary_week": None,
         "reset_id": RESET_ID,
+        "restored_id": RESTORE_ID,  # a new ledger needs no restore
     }
     if summary_due(ledger, now):  # started after this week's summary time
         ledger["summary_week"] = _week(now)
@@ -291,6 +298,55 @@ def wipe(ledger, now):
 WIPED = ("🧹 مُسحت الصفقات الورقية: صفقات البيتكوين واختبار الوقف المختلط. "
          "نسخة كاملة من السجل القديم في الملف أعلاه ({name}): احتفظ بها إن أردت الرجوع إليها.\n"
          "بقيت كما هي: مراجعة تنبيهات الوقف على صفقاتك الحقيقية، وقياس دقة نموذج البيتكوين.")
+
+
+def restore(ledger, saved):
+    """Merges a saved copy into the ledger: its trades, tests and review
+    come first, and anything the ledger already has (by id) is kept."""
+    def merged(old, new, ident):
+        seen = {ident(x) for x in new}
+        return [x for x in old if ident(x) not in seen] + new
+
+    by_id = lambda t: t.get("id")
+    ledger["open"] = merged(saved.get("open", []), ledger["open"], by_id)
+    ledger["closed"] = merged(saved.get("closed", []), ledger["closed"], by_id)
+    cal, old = ledger["calibration"], saved.get("calibration") or {}
+    for k in ("n", "model", "market"):
+        cal[k] = cal.get(k, 0) + old.get(k, 0)
+    ledger["started_at"] = min(ledger["started_at"], saved.get("started_at") or ledger["started_at"])
+    review, old = ledger.setdefault("level_alerts", {"open": [], "closed": []}), saved.get("level_alerts") or {}
+    for part in ("open", "closed"):
+        entries = [{**e, "key": e.get("key") or f"restored:{e.get('market_id')}:{e.get('token_id')}:{e.get('kind')}"}
+                   for e in old.get(part, [])]
+        review[part] = merged(entries, review[part], lambda e: e["key"])
+    for name in ("match_test", "strict_test"):
+        if name not in saved:
+            continue
+        sec, old = ledger.setdefault(name, {}), saved[name]
+        for part in ("open", "closed"):
+            sec[part] = merged(old.get(part, []), sec.get(part, []), by_id)
+        for key, value in old.items():
+            if key in ("open", "closed"):
+                continue
+            if isinstance(value, list):
+                sec[key] = value + [v for v in sec.get(key, []) if v not in value]
+            elif isinstance(value, dict) and key == "skipped":
+                sec[key] = {k: value.get(k, 0) + sec.get(key, {}).get(k, 0) for k in set(value) | set(sec.get(key, {}))}
+            elif key == "skipped":
+                sec[key] = value + (sec.get(key) or 0)
+            elif key not in sec or sec[key] is None:
+                sec[key] = value
+    ledger["restored_id"] = RESTORE_ID
+
+
+RESTORED = ("♻️ استرجعت نتائج التداول على الورق التي ضاعت عند إعادة التشغيل (من نسخة 23 أكتوبر 20:45): "
+            "{strict} صفقة للميزان الصارم، {hybrid} مباراة للوقف المختلط، و{review} تنبيه في مراجعة الوقف. "
+            "أرسل /paper لرؤيتها.")
+
+MISSING = ("⚠️ لم أجد ملف سجل التداول على الورق المثبّت ({why}).\n"
+           "أعمل الآن على سجل جديد لم أثبّته، حتى لا يختفي القديم تحته. التنبيهات والبيع التلقائي تعمل كالعادة.\n"
+           "لاسترجاع السجل القديم: ثبّت ملف \"📒 سجل التداول على الورق\" القديم، ثم أعد تشغيل البوت من Render.\n"
+           "ولبدء سجل جديد فعلاً: ثبّت الملف الجديد بنفسك.")
 
 
 def _week(now):
@@ -637,7 +693,9 @@ def run_forever():
                 ledger = store.load()  # raises if unreadable: never overwrite a ledger we could not read
                 if ledger is None:
                     ledger, dirty = new_ledger(datetime.now(timezone.utc)), True
-                    alerts.send_alert(INTRO.format(stake=STAKE, edge=MIN_EDGE * 100))
+                    missing = getattr(store, "missing", None)
+                    alerts.send_alert(MISSING.format(why=missing) if missing
+                                      else INTRO.format(stake=STAKE, edge=MIN_EDGE * 100))
                 elif ledger.get("reset_id") != RESET_ID:
                     now = datetime.now(timezone.utc)
                     name = f"paper_trades_before_{now:%Y%m%d}.json"
@@ -645,6 +703,17 @@ def run_forever():
                     wipe(ledger, now)
                     dirty = True
                     alerts.send_alert(WIPED.format(name=name))
+                if ledger.get("restored_id") != RESTORE_ID and os.path.exists(RESTORE_FILE):
+                    with open(RESTORE_FILE, encoding="utf-8") as f:
+                        saved = json.load(f)
+                    original = ledger["started_at"] <= saved["started_at"]  # the old file came back by itself
+                    restore(ledger, {} if original else saved)
+                    dirty = True
+                    if not original:
+                        alerts.send_alert(RESTORED.format(
+                            strict=len(ledger.get("strict_test", {}).get("closed", [])),
+                            hybrid=len(ledger.get("match_test", {}).get("closed", [])),
+                            review=len(ledger["level_alerts"]["open"]) + len(ledger["level_alerts"]["closed"])))
                 alert_memory.restore(ledger.get("alert_memory"))
                 with _lock:
                     _ledger = ledger

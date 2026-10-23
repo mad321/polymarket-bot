@@ -9,7 +9,11 @@ change (silently), and reads it back from the chat's pinned message on start.
 Set PAPER_LEDGER_FILE to keep the ledger in a local file instead (local runs).
 
 If the pinned message is deleted or another message is pinned after it, the
-bot no longer finds the ledger and starts a new one, and says so in Telegram.
+bot no longer finds the ledger. It then keeps working on a new ledger that it
+does NOT pin, and says so in Telegram, so the old file is never buried under
+it (on 2026-10-23 a restart missed the ledger, pinned a new empty one, and the
+results seemed lost). Re-pin the old file and restart to get it back, or pin
+the new one yourself to start over.
 """
 
 import os
@@ -64,6 +68,8 @@ class TelegramStore:
     def __init__(self):
         self.message_id = None
         self.pinned = False
+        self.may_pin = True   # False once a load found no ledger: never bury the old one
+        self.missing = None   # what was pinned instead, when the ledger was not found
 
     def describe(self):
         return "telegram pinned message"
@@ -97,6 +103,9 @@ class TelegramStore:
         pinned = chat.get("pinned_message") or {}
         document = pinned.get("document") or {}
         if document.get("file_name") != FILE_NAME or not (pinned.get("from") or {}).get("is_bot"):
+            self.may_pin = False
+            self.missing = ("لا توجد رسالة مثبّتة" if not pinned else
+                            f"الرسالة المثبّتة الأخيرة ليست ملف السجل ({document.get('file_name') or 'رسالة بلا ملف'})")
             return None
         info = self._call("getFile", {"file_id": document["file_id"]})
         token = self._token()
@@ -137,7 +146,7 @@ class TelegramStore:
                               {"chat_id": self._chat_id(), "caption": CAPTION, "disable_notification": "true"},
                               {"document": (FILE_NAME, content, "application/json")})
             self.message_id, self.pinned = sent["message_id"], False
-        if not self.pinned:  # retried on the next save if pinning failed
+        if not self.pinned and self.may_pin:  # retried on the next save if pinning failed
             self._call("pinChatMessage", {"chat_id": self._chat_id(), "message_id": self.message_id,
                                           "disable_notification": "true"})
             self.pinned = True
