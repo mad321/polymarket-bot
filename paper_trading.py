@@ -47,6 +47,7 @@ import pytz
 import requests
 
 import alert_memory
+import live_feed
 import alerts
 import match_strategy
 import paper_store
@@ -659,6 +660,9 @@ def scan_once(ledger, now=None):
             messages += settle(ledger, winners, now)
             if data:
                 messages += open_trades(ledger, *data, now)
+        records = live_feed.drain()
+        if records:  # goals with the price around them
+            ledger["latency"] = (ledger.get("latency", []) + records)[-live_feed.MAX_RECORDS:]
         if alert_memory.ready():  # never overwrite saved times before they were restored
             ledger["alert_memory"] = alert_memory.snapshot(now.timestamp())
         if summary_due(ledger, now):

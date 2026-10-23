@@ -47,6 +47,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 import auto_stop
+import live_feed
 import positions as positions_module
 import stop_review
 import strict_strategy
@@ -203,7 +204,8 @@ def parse_game(event, league=None):
         return None
     # حجم تداول الحدث = مجموع حجوم جميع الأسواق فيه
     volume = sum(float(m.get("volume") or 0) for m in (event.get("markets") or []))
-    return {"slug": event["slug"], "league": league, "title": title, "start": start, "sides": sides,
+    return {"slug": event["slug"], "game_id": event.get("gameId"), "league": league, "title": title,
+            "start": start, "sides": sides,
             "live": bool(event.get("live")), "ended": bool(event.get("ended")),
             "period": str(event.get("period") or "").upper(), "elapsed": str(event.get("elapsed") or ""),
             "score": str(event.get("score") or ""), "volume": round(volume, 2)}
@@ -331,6 +333,9 @@ def fetch(plan_, now):
             data["games"][g["slug"]] = g
         live = dict(plan_["live"])
         data["positions"] = _positions_in_play(now)
+        if live_feed.enabled():  # games under way and your positions, watched second by second
+            live_feed.watch([g for g in _schedule.values() if g["start"] <= now <= g["start"] + timedelta(hours=3)],
+                            data["positions"])
         for pos in data["positions"]:
             live[pos["_game"]["slug"]] = pos["_game"]["league"]
         for slug, league in live.items():
