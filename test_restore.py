@@ -105,6 +105,24 @@ class OriginalLedgerTests(unittest.TestCase):
         self.assertEqual((saved_ledger["calibration"]["n"], saved_ledger["restored_id"]), (128, pt.RESTORE_ID))
 
 
+class CalibrationResetTests(unittest.TestCase):
+    def test_accuracy_is_cleared_once_and_reported(self):
+        ledger = pt.new_ledger(NOW)
+        del ledger["calibration_reset"]
+        ledger["calibration"] = {"n": 128, "model": 7.143, "market": 6.871}
+        ledger["closed"] = [{"id": "btc"}]
+        store = mock.Mock(describe=lambda: "mock")
+        store.load.return_value = ledger
+        send = RestoreTests.run_loop(self, store)
+        self.assertIn("🧹 مُسح قياس دقة نموذج البيتكوين: كان على 128 سوق، النموذج 0.0558 والسوق 0.0537",
+                      send.call_args.args[0])
+        saved_ledger = store.save.call_args.args[0]
+        self.assertEqual(saved_ledger["calibration"], {"n": 0, "model": 0.0, "market": 0.0})
+        self.assertEqual(saved_ledger["closed"], [{"id": "btc"}])  # nothing else is touched
+        store.load.return_value = saved_ledger
+        RestoreTests.run_loop(self, store).assert_not_called()
+
+
 class MissingLedgerTests(unittest.TestCase):
     def store_with_pinned(self, pinned):
         store = paper_store.TelegramStore()
