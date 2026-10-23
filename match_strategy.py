@@ -46,6 +46,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+import auto_stop
 import positions as positions_module
 import stop_review
 import strict_strategy
@@ -560,6 +561,8 @@ def position_alerts(ledger, data, now):
         rule = alert_rule(float(pos.get("buy_price") or 0) / 100, game, mid_price(book))
         if rule is None:
             continue
+        if rule == "stop" and auto_stop.applies(pos):
+            auto_stop.request(pos, mid_price(book))  # retried every minute until sold
         key = f"{pos.get('wallet', '')}:{token}:{rule}"
         if key in sent:
             continue
@@ -599,11 +602,15 @@ def position_alert(pos, game, rule, book):
     if rule == "target":
         lines.append("إن كان أمر البيع المحدد عند +20% قائماً فقد يكون نُفّذ: تأكد في بولي ماركت. "
                      "تذكير: بولي ماركت يمسح الأوامر عند بداية المباراة، فالأمر الموضوع قبلها لم يعد قائماً.")
-    lines.append("القاعدة تقول: بِع. القرار لك، فالاستراتيجية ما زالت قيد الاختبار.")
+    auto = rule == "stop" and auto_stop.applies(pos)
+    if auto:
+        lines.append("🤖 البوت يبيع كل الأسهم الآن تلقائياً (AUTO_STOP)، وستصلك النتيجة.")
+    else:
+        lines.append("القاعدة تقول: بِع. القرار لك، فالاستراتيجية ما زالت قيد الاختبار.")
     if not in_bot_wallet and pos.get("url"):
         lines.append(pos["url"])
     text = "\n".join(lines)
-    if trading.can_sell(pos.get("wallet")):
+    if trading.can_sell(pos.get("wallet")) and not auto:
         return text, telegram_actions.sell_button(pos["id"], pos.get("wallet"))
     return text
 
