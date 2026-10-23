@@ -118,6 +118,10 @@ RESET_ID = "2026-10-18 strategy 3.0"
 # one. RESTORE_FILE is the public copy of /api/paper taken 8 minutes before;
 # it is merged once into whatever ledger is loaded (restored_id marks it).
 RESTORE_ID = "2026-10-23"
+# The owner cleared the model-vs-market accuracy on 2026-10-23 (it stood at
+# 128 markets: model 0.0558, market 0.0537, kept in LESSONS.md). Cleared once.
+CALIBRATION_RESET_ID = "2026-10-23"
+
 RESTORE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "restore", "paper_trades_2026-10-23.json")
 
 
@@ -275,6 +279,7 @@ def new_ledger(now):
         "summary_week": None,
         "reset_id": RESET_ID,
         "restored_id": RESTORE_ID,  # a new ledger needs no restore
+        "calibration_reset": CALIBRATION_RESET_ID,
     }
     if summary_due(ledger, now):  # started after this week's summary time
         ledger["summary_week"] = _week(now)
@@ -342,6 +347,9 @@ def restore(ledger, saved):
 RESTORED = ("♻️ استرجعت نتائج التداول على الورق التي ضاعت عند إعادة التشغيل (من نسخة 23 أكتوبر 20:45): "
             "{strict} صفقة للميزان الصارم، {hybrid} مباراة للوقف المختلط، و{review} تنبيه في مراجعة الوقف. "
             "أرسل /paper لرؤيتها.")
+
+CALIBRATION_CLEARED = ("🧹 مُسح قياس دقة نموذج البيتكوين: كان على {n} سوق، النموذج {model:.4f} والسوق {market:.4f} "
+                       "(الأقل أدق). الأرقام محفوظة في LESSONS.md، والقياس يبدأ من الصفر.")
 
 MISSING = ("⚠️ لم أجد ملف سجل التداول على الورق المثبّت ({why}).\n"
            "أعمل الآن على سجل جديد لم أثبّته، حتى لا يختفي القديم تحته. التنبيهات والبيع التلقائي تعمل كالعادة.\n"
@@ -714,6 +722,14 @@ def run_forever():
                             strict=len(ledger.get("strict_test", {}).get("closed", [])),
                             hybrid=len(ledger.get("match_test", {}).get("closed", [])),
                             review=len(ledger["level_alerts"]["open"]) + len(ledger["level_alerts"]["closed"])))
+                if ledger.get("calibration_reset") != CALIBRATION_RESET_ID:
+                    cal = ledger["calibration"]
+                    alerts.send_alert(CALIBRATION_CLEARED.format(
+                        n=cal["n"], model=cal["model"] / cal["n"] if cal["n"] else 0,
+                        market=cal["market"] / cal["n"] if cal["n"] else 0))
+                    ledger.update(calibration={"n": 0, "model": 0.0, "market": 0.0},
+                                  calibration_reset=CALIBRATION_RESET_ID)
+                    dirty = True
                 alert_memory.restore(ledger.get("alert_memory"))
                 with _lock:
                     _ledger = ledger
