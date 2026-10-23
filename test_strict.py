@@ -91,14 +91,35 @@ class StrictTests(unittest.TestCase):
         self.assertIn("https://polymarket.com/event/" + SLUG, text)
         self.assertEqual(ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=11), TZ), [])
 
-    def test_the_signal_is_sized_at_3_percent_of_the_wallets(self):
+    def test_the_signal_is_sized_at_2_percent_of_the_wallets(self):
         data = {"games": {SLUG: game()}, "candidates": [SLUG], "started": [], "payouts": {}, "error": None,
                 "books": {"yH": book(0.61, 0.62), "yA": book(0.14, 0.15)}, "capital": 1240.0}
         [text] = ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ)
-        self.assertIn("بـ $37.20 (3% من قيمة محفظتك $1,240.00)، أي حوالي 60 سهم", text)
+        self.assertIn("بـ $24.80 (2% من قيمة محفظتك $1,240.00)، أي حوالي 40 سهم", text)
         self.assertEqual(self.sec["open"][0]["shares"], 40.32)  # the paper test keeps $25
-        with mock.patch.dict(os.environ, {"SIGNAL_PCT": "2"}):
-            self.assertIn("$24.80 (2% من", st.signal(self.sec["open"][0], game(), 0, KICKOFF, 1240.0))
+        with mock.patch.dict(os.environ, {"SIGNAL_PCT": "3"}):
+            self.assertIn("$37.20 (3% من", st.signal(self.sec["open"][0], game(), 0, KICKOFF, 1240.0))
+
+    def test_morning_list_of_the_day_once(self):
+        def g(slug, start, home_ask, away_ask, volume=60000):
+            x = game()
+            x.update(slug=slug, start=start, volume=volume)
+            x["sides"] = {k: dict(v) for k, v in x["sides"].items()}
+            x["sides"]["home"]["ask"], x["sides"]["away"]["ask"] = home_ask, away_ask
+            return x
+        morning = KICKOFF.replace(hour=6)  # 9:00 in Riyadh
+        games = [g("a", KICKOFF, 0.62, 0.15), g("b", KICKOFF + timedelta(hours=3), 0.76, 0.10, volume=9000),
+                 g("c", KICKOFF, 0.40, 0.30), g("d", KICKOFF + timedelta(days=2), 0.62, 0.15)]
+        self.assertEqual(st.morning(self.sec, games, morning - timedelta(hours=1), TZ), [])  # before 9:00
+        [text] = st.morning(self.sec, games, morning, TZ)
+        self.assertIn("مباريات مرشحة للميزان الصارم خلال 24 ساعة (2)", text)
+        self.assertIn("• 17:00 Chelsea FC (Chelsea FC vs. AFC Bournemouth): 62¢ ✅ داخل النطاق، حجم $60,000", text)
+        self.assertIn("76¢ 〰️ قريب من النطاق، حجم $9,000 ⚠️ أقل من $15,000 حتى الآن", text)
+        self.assertEqual(st.morning(self.sec, games, morning + timedelta(hours=2), TZ), [])  # once a day
+        sec2 = st.section(pt.new_ledger(KICKOFF))
+        self.assertEqual(st.morning(sec2, [games[2]], morning, TZ), [])  # nothing to list: no message
+        with mock.patch.dict(os.environ, {"BUY_SIGNALS": "0"}):
+            self.assertEqual(st.morning(st.section(pt.new_ledger(KICKOFF)), games, morning, TZ), [])
 
     def test_no_signal_when_signals_are_off_or_nothing_is_bought(self):
         data = {"games": {SLUG: game()}, "candidates": [SLUG], "started": [], "payouts": {}, "error": None,

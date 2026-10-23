@@ -34,8 +34,14 @@ Settings:
   STRICT_TEST=0   turn the test off (and the buy signals with it)
   BUY_SIGNALS=0   keep the test but send no buy signals
   SIGNAL_PCT      size of a suggested buy, in percent of the watched wallets'
-                  value (cash + open positions) at the time (default 3). The
+                  value (cash + open positions) at the time (default 2). The
                   paper test keeps its fixed $25.
+
+Each morning (9:00, ALERT_TZ) a heads-up lists the day's candidate games:
+an elite team priced near the range (NEAR_RANGE) in the next 24 hours, with
+kickoff time. It is not a signal to buy: prices move, and the lineups come
+out about an hour before kickoff. The buy signal still comes 15 minutes
+before kickoff, at the real price.
   STRICT_STAKE    virtual dollars per trade (default 25)
   STRICT_TEAMS    comma-separated team names replacing the elite list
 """
@@ -209,9 +215,9 @@ def signals_enabled():
 
 def signal_pct():
     try:
-        return float(os.environ.get("SIGNAL_PCT") or 3)
+        return float(os.environ.get("SIGNAL_PCT") or 2)
     except ValueError:
-        return 3.0
+        return 2.0
 
 
 def signal(trade, game, settled, now, capital=None):
@@ -286,6 +292,38 @@ def results_lines(trades):
         f"ولو احتفظت حتى النهاية {ms._usd(hold)} (‎{hold / paid * 100:+.1f}%)",
         f"الخروج: {RESULTS['target']} {rules['target']}، {RESULTS['stop']} {rules['stop']}، حتى النهاية {held}",
     ]
+
+
+NEAR_RANGE = (0.50, 0.77)  # the morning list: the entry range ±5¢
+
+
+def morning(sec, games, now, tz):
+    """Once a day from DIGEST_HOUR: today's candidate games, or nothing."""
+    if not signals_enabled():
+        return []
+    local = now.astimezone(tz)
+    today = local.strftime("%Y-%m-%d")
+    if local.hour < ms.DIGEST_HOUR or sec.get("morning_day") == today:
+        return []
+    sec["morning_day"] = today
+    rows = []
+    for game in sorted(games, key=lambda g: g["start"]):
+        if not now < game["start"] <= now + timedelta(hours=24):
+            continue
+        for s in game["sides"].values():
+            ask = s.get("ask")
+            if not is_elite(s["team"]) or ask is None or not NEAR_RANGE[0] <= ask <= NEAR_RANGE[1]:
+                continue
+            fits = ENTRY_RANGE[0] <= ask <= ENTRY_RANGE[1]
+            volume = game.get("volume", 0)
+            rows.append(f"• {game['start'].astimezone(tz):%H:%M} {s['team']} ({game['title']}): "
+                        f"{ask * 100:.0f}¢ {'✅ داخل النطاق' if fits else '〰️ قريب من النطاق'}، "
+                        f"حجم ${volume:,.0f}{'' if volume >= MIN_VOLUME else ' ⚠️ أقل من $15,000 حتى الآن'}")
+    if not rows:
+        return []
+    return ["\n".join([f"🗓️ مباريات مرشحة للميزان الصارم خلال 24 ساعة ({len(rows)}):"] + rows + [
+        "هذه قائمة للتخطيط، لا للشراء. الأسعار تتغير والتشكيلة تُعلن قبل المباراة بساعة تقريباً. "
+        "رسالة الشراء تصلك قبل البداية بربع ساعة إذا بقي السعر بين 55¢ و72¢."])]
 
 
 def digest(sec, now, tz):

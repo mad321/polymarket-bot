@@ -195,7 +195,8 @@ def parse_game(event, league=None):
         side = "home" if m.get("groupItemTitle") == home_name else "away"
         rate = (m.get("feeSchedule") or {}).get("rate", 0) if m.get("feesEnabled") else 0
         sides[side] = {"team": m.get("groupItemTitle"), "market_id": str(m["id"]), "token_id": str(yes),
-                       "fee_rate": float(rate), "min_size": float(m.get("orderMinSize") or 0)}
+                       "fee_rate": float(rate), "min_size": float(m.get("orderMinSize") or 0),
+                       "ask": float(m["bestAsk"]) if m.get("bestAsk") not in (None, "") else None}
     if set(sides) != {"home", "away"}:
         return None
     try:
@@ -476,6 +477,7 @@ def apply(ledger, data, now, tz):
     if strict_strategy.enabled():
         strict = strict_strategy.section(ledger)
         messages += strict_strategy.apply(strict, data, now)  # buy signals
+        messages += strict_strategy.morning(strict, _schedule.values(), now, tz)
         messages += strict_strategy.digest(strict, now, tz)
     if not enabled():
         STATE.update(last_scan_at=_iso(now))
