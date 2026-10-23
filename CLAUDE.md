@@ -42,7 +42,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 5. **Tests before every push**, and they must not touch the network:
 
    ```bash
-   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py test_auto_stop.py test_restore.py
+   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py test_auto_stop.py test_restore.py test_live.py
    ```
 
    A suite that suddenly takes seconds is calling the internet: mock it.
@@ -60,6 +60,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 | Football hybrid stop-loss: shadow test + alerts on real positions | `match_strategy.py` |
 | Strategy 3.0 "الميزان الصارم" paper test; ±20% alerts on real positions | `strict_strategy.py` (alerts in `match_strategy.position_alerts`) |
 | Automatic sale at the stop-loss (`AUTO_STOP=1`) | `auto_stop.py` |
+| Live prices and scores (WebSockets): instant stops, goal-vs-price timing | `live_feed.py` (`LIVE_FEED=0` turns it off) |
 | Wiping paper trades (archive first, then clear) | `paper_trading.RESET_ID`, `wipe` |
 | Restoring the ledger lost on Oct 23 (once) | `paper_trading.restore`, `restore/` |
 | Stop/target alert review (sell at alert vs hold) | `stop_review.py` |

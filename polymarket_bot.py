@@ -411,6 +411,7 @@ def alerts_status():
     No secrets here."""
     import alerts
     import auto_stop
+    import live_feed
     import exposure
     import match_strategy
     import strict_strategy
@@ -424,6 +425,7 @@ def alerts_status():
         "telegram_commands": telegram_actions.STATE,
         "trading": trading.status(),
         "auto_stop": auto_stop.status(),
+        "live_feed": live_feed.status(),
         "paper_trading": paper_trading.STATE,
         "position_size": exposure.STATE,
         "match_test": match_strategy.STATE,
@@ -483,6 +485,8 @@ def ensure_monitor():
     import paper_trading
     if paper_trading.ledger_available():  # paper trading and the stop-alert review
         threading.Thread(target=start_paper_trading, daemon=True).start()
+        import live_feed
+        live_feed.start()  # second-by-second prices and scores for the games the loop watches
 
 
 # Run a single process (one gunicorn worker): one monitor, one Telegram poller
