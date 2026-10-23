@@ -298,10 +298,42 @@ def apply(ledger, fetched, now):
     return [message(trades[k], table) for k in sorted(new, key=lambda k: trades[k]["closed_at"])]
 
 
+STRATEGY_START = "2026-10-19"  # strategy 3.0 began; the indicator counts real trades from here
+
+
+def indicator(n, wins, pnl, cost):
+    """How a strategy stands: progress to 30 trades, win rate and its range
+    against the break-even, net, and a verdict."""
+    low, high = wilson(wins, n)
+    if n < MIN_SAMPLE:
+        status, tone = "مبكر للحكم", "wait"
+    elif low > BREAK_EVEN:
+        status, tone = "ناجحة", "good"
+    elif high < BREAK_EVEN:
+        status, tone = "خاسرة", "bad"
+    else:
+        status, tone = "غير محسومة", "wait"
+    return {"n": n, "wins": wins, "rate": wins / n if n else None, "low": low, "high": high,
+            "pnl": pnl, "ret": pnl / cost if cost else None, "progress": min(100, round(n / MIN_SAMPLE * 100)),
+            "status": status, "tone": tone, "leaning": None if n == 0 else ("good" if pnl > 0 else "bad")}
+
+
+def real_indicators(trades, since=STRATEGY_START):
+    """Your real trades since strategy 3.0: as traded, and if each had been held to the end."""
+    recent = [t for t in trades if t["closed_at"] >= since]
+    held = [t for t in recent if t.get("hold_pnl") is not None]
+    return {"actual": indicator(len(recent), sum(t["pnl"] > 0 for t in recent),
+                                sum(t["pnl"] for t in recent), sum(t["cost"] for t in recent)),
+            "hold": indicator(len(held), sum(t["hold_pnl"] > 0 for t in held),
+                              sum(t["hold_pnl"] for t in held), sum(t["cost"] for t in held)),
+            "since": since}
+
+
 def dashboard(ledger):
     """Groups and totals for the private part of the dashboard."""
     trades = list(section(ledger)["trades"].values())
     held = [t for t in trades if t.get("hold_pnl") is not None]
     return {"n": len(trades), "wins": sum(t["pnl"] > 0 for t in trades), "pnl": sum(t["pnl"] for t in trades),
             "cost": sum(t["cost"] for t in trades), "hold": sum(t["hold_pnl"] for t in held),
-            "hold_pnl_same": sum(t["pnl"] for t in held), "hold_n": len(held), "groups": stats(trades)}
+            "hold_pnl_same": sum(t["pnl"] for t in held), "hold_n": len(held), "groups": stats(trades),
+            "indicators": real_indicators(trades)}

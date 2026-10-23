@@ -76,6 +76,23 @@ class PositionTests(unittest.TestCase):
         self.assertEqual(table[("الفريق", "من قائمة النخبة")]["verdict"], "يخسر")
 
 
+class IndicatorTests(unittest.TestCase):
+    def test_verdicts(self):
+        self.assertEqual(tj.indicator(4, 2, -5.65, 101)["status"], "مبكر للحكم")
+        self.assertEqual(tj.indicator(4, 2, -5.65, 101)["progress"], 13)
+        self.assertEqual(tj.indicator(40, 32, 90, 1000)["status"], "ناجحة")   # 80%, range above 57%
+        self.assertEqual(tj.indicator(40, 12, -90, 1000)["status"], "خاسرة")  # 30%, range below
+        self.assertEqual(tj.indicator(40, 24, 10, 1000)["status"], "غير محسومة")
+        self.assertIsNone(tj.indicator(0, 0, 0, 0)["rate"])
+
+    def test_real_indicators_count_from_strategy_3(self):
+        old = {"closed_at": "2026-10-10T00:00:00+00:00", "pnl": -10, "cost": 25, "hold_pnl": 15}
+        new = {"closed_at": "2026-10-20T00:00:00+00:00", "pnl": 5, "cost": 25, "hold_pnl": 12}
+        ind = tj.real_indicators([old, new, {**new, "hold_pnl": None, "pnl": -3}])
+        self.assertEqual((ind["actual"]["n"], ind["actual"]["wins"], ind["actual"]["pnl"]), (2, 1, 2))
+        self.assertEqual((ind["hold"]["n"], ind["hold"]["pnl"]), (1, 12))
+
+
 class ApplyTests(unittest.TestCase):
     def fetched(self, rows=ROWS):
         ps = tj.positions_from(rows, W)
@@ -155,6 +172,17 @@ class PrivatePageTests(unittest.TestCase):
         self.assertIn("dashboard_key=s3cret", r.headers.get("Set-Cookie", ""))
         html = self.get("/", {"DASHBOARD_KEY": "s3cret"}, cookie="s3cret").get_data(as_text=True)
         self.assertIn("$812.50", html)
+
+    def test_the_page_shows_both_strategy_indicators(self):
+        pt._ledger = pt.new_ledger(datetime.now(timezone.utc))
+        self.addCleanup(setattr, pt, "_ledger", None)
+        tj.apply(pt._ledger, ApplyTests.fetched(None), None)
+        html = self.get("/?key=s3cret", {"DASHBOARD_KEY": "s3cret"}).get_data(as_text=True)
+        self.assertIn("مؤشر 3.0 كما هي", html)
+        self.assertIn("مؤشر 3.1: نفس الدخول، احتفاظ حتى النهاية", html)
+        self.assertIn("مؤشر صفقاتك الحقيقية منذ 3.0", html)
+        self.assertIn("مبكر للحكم", html)
+        self.assertNotIn("دوري أمم أوروبا", html)
 
 
 if __name__ == "__main__":

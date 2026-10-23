@@ -213,10 +213,23 @@ DASHBOARD_TEMPLATE = """
         .table-wrap td { padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
         .table-wrap tr:last-child td { border-bottom: none; }
         .tag { display: inline-block; margin-inline-start: 6px; padding: 1px 8px; border-radius: 999px; font-size: 0.75em; color: var(--blue); border: 1px solid rgba(76,201,240,0.4); }
+        .inds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 14px; }
+        .ind { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; }
+        .ind h3 { font-size: 1em; font-weight: 700; margin-bottom: 2px; }
+        .ind .why { color: var(--muted); font-size: 0.78em; margin-bottom: 12px; }
+        .ind .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-top: 6px; font-size: 0.9em; }
+        .ind .row .lbl { color: var(--muted); }
+        .chip { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.8em; font-weight: 700; }
+        .chip.good { color: var(--green); background: rgba(34,211,155,0.12); }
+        .chip.bad { color: var(--red); background: rgba(255,90,110,0.12); }
+        .chip.wait { color: var(--amber); background: rgba(245,185,66,0.12); }
+        .bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin-top: 10px; }
+        .bar > div { height: 100%; background: linear-gradient(90deg, var(--blue), var(--green)); }
         .warn { margin-bottom: 14px; padding: 12px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); color: var(--amber); font-size: 0.9em; }
 
         @media (max-width: 820px) {
             .summary, .strict .summary { grid-template-columns: repeat(2, 1fr); }
+            .inds { grid-template-columns: 1fr; }
             .grid { grid-template-columns: 1fr; }
         }
         @media (max-width: 420px) {
@@ -226,13 +239,25 @@ DASHBOARD_TEMPLATE = """
     </style>
 </head>
 <body>
+{% macro indicator(i, title, why) %}
+<div class="ind">
+    <div class="row" style="margin-top:0"><h3>{{ title }}</h3><span class="chip {{ i.tone }}">{{ i.status }}</span></div>
+    <div class="why">{{ why }}</div>
+    <div class="row"><span class="lbl">نسبة الربح</span>
+        <span>{% if i.rate is none %}—{% else %}{% if i.n %}<span style="color:var(--muted);font-size:.85em">(المدى <span class="num">{{ "%.0f"|format(i.low * 100) }}–{{ "%.0f"|format(i.high * 100) }}%</span>)</span> {% endif %}<span class="num {% if i.rate >= 0.57 %}pos{% else %}neg{% endif %}">{{ "%.0f"|format(i.rate * 100) }}%</span>{% endif %}</span></div>
+    <div class="row"><span class="lbl">الصافي</span>
+        <span class="num {% if i.pnl >= 0 %}pos{% else %}neg{% endif %}">{% if i.pnl >= 0 %}+${{ "%.2f"|format(i.pnl) }}{% else %}-${{ "%.2f"|format(-i.pnl) }}{% endif %}{% if i.ret is not none %} ({{ "%+.1f"|format(i.ret * 100) }}%){% endif %}</span></div>
+    <div class="row"><span class="lbl">الطريق إلى الحكم</span><span class="num">{{ i.n }} / 30 صفقة</span></div>
+    <div class="bar"><div style="width: {{ i.progress }}%"></div></div>
+</div>
+{% endmacro %}
 <div class="container">
     <header class="header">
         <div class="brand">
             <div class="logo">📊</div>
             <div>
                 <h1>مراقب صفقات <span>بوليماركت</span></h1>
-                <p>دوري أمم أوروبا</p>
+                <p>صفقاتك وتجارب الاستراتيجية</p>
             </div>
         </div>
         <div class="live"><span class="dot"></span> مباشر · آخر تحديث <span class="num">{{ last_update }}</span></div>
@@ -357,6 +382,10 @@ DASHBOARD_TEMPLATE = """
             <h2>📘 ما تعلمناه من صفقاتك الحقيقية</h2>
             <span>صفقات "هل سيفوز الفريق؟" منذ 1 أكتوبر · تُحدَّث بعد كل صفقة تُغلق</span>
         </div>
+        <div class="inds">
+            {{ indicator(journal.indicators.actual, "مؤشر صفقاتك الحقيقية منذ 3.0", "منذ " ~ journal.indicators.since ~ "، كما تداولتها فعلاً") }}
+            {{ indicator(journal.indicators.hold, "لو احتفظت بها حتى النهاية", "نفس الصفقات، على ما حُسم سوقه") }}
+        </div>
         <div class="summary">
             <div class="kpi"><div class="lbl">صفقات أُغلقت</div><div class="val num">{{ journal.n }}</div>
                 <div class="sub">ربح {{ journal.wins }}{% if journal.n %} ({{ "%.0f"|format(journal.wins / journal.n * 100) }}%){% endif %}</div></div>
@@ -397,6 +426,10 @@ DASHBOARD_TEMPLATE = """
         {% if strict is none %}
         <div class="warn">البوت ما زال يحمّل سجل التجربة، حدّث الصفحة بعد دقيقة.</div>
         {% else %}
+        <div class="inds">
+            {{ indicator(strict.indicators.strategy, "مؤشر 3.0 كما هي", "بيع عند +20% أو −20%") }}
+            {{ indicator(strict.indicators.hold, "مؤشر 3.1: نفس الدخول، احتفاظ حتى النهاية", "نفس الصفقات بلا هدف ولا وقف: المقارنة التي يقترحها سجلك") }}
+        </div>
         {% if strict.settled < 30 %}<div class="warn">⚠️ <span class="num">{{ strict.settled }}</span> صفقة فقط: الحكم يحتاج 30 صفقة محسومة على الأقل.</div>{% endif %}
         <div class="summary">
             <div class="kpi"><div class="lbl">صفقات محسومة</div><div class="val num">{{ strict.settled }}</div>
