@@ -53,6 +53,7 @@ import match_strategy
 import paper_store
 import stop_review
 import strict_strategy
+import trade_journal
 
 logger = logging.getLogger(__name__)
 
@@ -565,12 +566,21 @@ def public_ledger():
             return None
         ledger = json.loads(json.dumps(_ledger))
     ledger.pop("alert_memory", None)
+    ledger.pop("journal", None)  # your real trades: private
     ledger.get("match_test", {}).pop("alerted", None)
     for section in ("open", "closed"):
         for entry in ledger.get("level_alerts", {}).get(section, []):
             entry.pop("key", None)
     ledger["snapshots"] = {"pending": len(ledger.get("snapshots") or {})}
     return ledger
+
+
+def journal_figures():
+    """The trade journal's groups for the private dashboard, or None."""
+    with _lock:
+        if _ledger is None:
+            return None
+        return trade_journal.dashboard(_ledger)
 
 
 def status_text():
@@ -622,6 +632,7 @@ def scan_once(ledger, now=None):
         due = due_market_ids(ledger, now) if paper else set()
         review = stop_review.open_entries(ledger)
         match_plan = match_strategy.plan(ledger, now) if matches else None
+        journal_view = json.loads(json.dumps(trade_journal.section(ledger))) if trade_journal.due(now.timestamp()) else None
     winners = {}
     for market_id in due:
         try:
@@ -633,6 +644,7 @@ def scan_once(ledger, now=None):
             winners[market_id] = winner
     payouts = _review_payouts(review, now)
     match_data = match_strategy.fetch(match_plan, now) if matches else None
+    journal = trade_journal.fetch(journal_view, now.timestamp()) if journal_view is not None else None
 
     data, error = None, None
     if paper:
@@ -656,6 +668,7 @@ def scan_once(ledger, now=None):
         messages += stop_review.settle(ledger, payouts, _iso(now))
         if match_data:
             messages += match_strategy.apply(ledger, match_data, now, TZ)
+        messages += trade_journal.apply(ledger, journal, now)  # what each closed real trade teaches
         if paper:
             messages += settle(ledger, winners, now)
             if data:

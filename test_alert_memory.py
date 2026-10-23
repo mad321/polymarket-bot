@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 os.environ["ENABLE_MONITOR"] = "0"
+os.environ["JOURNAL"] = "0"  # the trade journal reads the network; its tests are in test_journal.py
 
 import alert_memory
 import exposure

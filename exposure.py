@@ -60,6 +60,24 @@ def wallet_cash(address):
     return int(body["result"], 16) / 1e6
 
 
+_cash = {"at": 0.0, "value": None}
+
+
+def cash(max_age=600, now=None):
+    """pUSD cash of the watched wallets (cached), or None when unreadable.
+    For the private dashboard only."""
+    now = now or time.time()
+    if _cash["value"] is not None and now - _cash["at"] < max_age:
+        return _cash["value"]
+    try:
+        total = sum(wallet_cash(w) for w in positions_module.watched_wallets())
+    except Exception as e:
+        logger.warning(f"[EXPOSURE] reading cash: {type(e).__name__}: {e}"[:300])
+        return None
+    _cash.update(at=now, value=total)
+    return total
+
+
 _capital = {"at": 0.0, "value": None}
 
 

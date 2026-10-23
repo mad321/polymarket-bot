@@ -1,7 +1,7 @@
 import os
 import logging
 import threading
-from flask import Flask, render_template_string, jsonify
+from flask import Flask, render_template_string, jsonify, request, make_response
 from datetime import datetime
 
 from positions import load_positions
@@ -238,6 +238,23 @@ DASHBOARD_TEMPLATE = """
         <div class="live"><span class="dot"></span> مباشر · آخر تحديث <span class="num">{{ last_update }}</span></div>
     </header>
 
+    {% if private %}
+    <section class="summary">
+        <div class="kpi"><div class="lbl">💼 قيمة المحفظة الآن</div>
+            <div class="val num">{% if wallet_value is not none %}${{ "{:,.2f}".format(wallet_value) }}{% else %}—{% endif %}</div>
+            <div class="sub">النقد + الصفقات المفتوحة بسعرها الحالي</div></div>
+        <div class="kpi"><div class="lbl">💵 الكاش المتوفر</div>
+            <div class="val num">{% if cash is not none %}${{ "{:,.2f}".format(cash) }}{% else %}—{% endif %}</div>
+            <div class="sub">{% if cash is none %}تعذّرت القراءة الآن{% elif wallet_value %}{{ "%.0f"|format(cash / wallet_value * 100) }}% من المحفظة{% endif %}</div></div>
+        <div class="kpi"><div class="lbl">📈 الصفقات المفتوحة</div>
+            <div class="val num">${{ "{:,.2f}".format(total_value) }}</div>
+            <div class="sub">بالسعر الحالي</div></div>
+        <div class="kpi"><div class="lbl">🎯 حجم الصفقة المقترح (2%)</div>
+            <div class="val num">{% if wallet_value %}${{ "%.2f"|format(wallet_value * 0.02) }}{% else %}—{% endif %}</div>
+            <div class="sub">مبلغ رسالة الشراء القادمة تقريباً</div></div>
+    </section>
+    {% elif private_hint %}<div class="warn">{{ private_hint }}</div>{% endif %}
+
     <section class="summary">
         <div class="kpi">
             <div class="lbl">الصفقات المفتوحة</div>
@@ -332,6 +349,44 @@ DASHBOARD_TEMPLATE = """
         <div>لا توجد صفقات مفتوحة حالياً</div>
         {% if data_source == 'wallet' %}<div class="note">تأكد أن WALLET_ADDRESS هو عنوان محفظة Polymarket (من صفحة البروفايل) وليس عنوان المفتاح</div>{% endif %}
     </div>
+    {% endif %}
+
+    {% if private and journal %}
+    <section class="strict">
+        <div class="section-title">
+            <h2>📘 ما تعلمناه من صفقاتك الحقيقية</h2>
+            <span>صفقات "هل سيفوز الفريق؟" منذ 1 أكتوبر · تُحدَّث بعد كل صفقة تُغلق</span>
+        </div>
+        <div class="summary">
+            <div class="kpi"><div class="lbl">صفقات أُغلقت</div><div class="val num">{{ journal.n }}</div>
+                <div class="sub">ربح {{ journal.wins }}{% if journal.n %} ({{ "%.0f"|format(journal.wins / journal.n * 100) }}%){% endif %}</div></div>
+            <div class="kpi"><div class="lbl">الصافي</div>
+                <div class="val num {% if journal.pnl >= 0 %}pos{% else %}neg{% endif %}">{% if journal.pnl >= 0 %}+${{ "%.2f"|format(journal.pnl) }}{% else %}-${{ "%.2f"|format(-journal.pnl) }}{% endif %}</div>
+                <div class="sub">من <span class="num">${{ "%.2f"|format(journal.cost) }}</span></div></div>
+            <div class="kpi"><div class="lbl">لو احتفظت بكل صفقة حتى النهاية</div>
+                <div class="val num {% if journal.hold >= 0 %}pos{% else %}neg{% endif %}">{% if journal.hold >= 0 %}+${{ "%.2f"|format(journal.hold) }}{% else %}-${{ "%.2f"|format(-journal.hold) }}{% endif %}</div>
+                <div class="sub">على {{ journal.hold_n }} صفقة حُسم سوقها، وصافيها الفعلي <span class="num">{% if journal.hold_pnl_same >= 0 %}+{% else %}-{% endif %}${{ "%.2f"|format(journal.hold_pnl_same|abs) }}</span></div></div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>المجموعة</th><th>صفقات</th><th>نسبة الربح</th><th>المدى المحتمل</th><th>الصافي</th><th>لو احتفظت</th><th>الحكم</th></tr></thead>
+                <tbody>
+                {% for g in journal.groups %}
+                <tr>
+                    <td>{{ g.dim }}: <bdi>{{ g.name }}</bdi></td>
+                    <td class="num">{{ g.n }}</td>
+                    <td class="num {% if g.rate >= 0.57 %}pos{% else %}neg{% endif %}">{{ "%.0f"|format(g.rate * 100) }}%</td>
+                    <td class="num">{{ "%.0f"|format(g.low * 100) }}–{{ "%.0f"|format(g.high * 100) }}%</td>
+                    <td class="num {% if g.pnl >= 0 %}pos{% else %}neg{% endif %}">{% if g.pnl >= 0 %}+${{ "%.2f"|format(g.pnl) }}{% else %}-${{ "%.2f"|format(-g.pnl) }}{% endif %}</td>
+                    <td class="num">{% if g.hold_n %}{% if g.hold >= 0 %}+${{ "%.2f"|format(g.hold) }}{% else %}-${{ "%.2f"|format(-g.hold) }}{% endif %}{% else %}—{% endif %}</td>
+                    <td>{{ g.verdict }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="note">"فرضية" = أقل من 30 صفقة. "يربح" أو "يخسر" = 30 صفقة أو أكثر والمدى كله فوق أو تحت التعادل (≈57%). "لو احتفظت" على الصفقات التي حُسم سوقها فقط.</div>
+    </section>
     {% endif %}
 
     <section class="strict">
@@ -432,7 +487,8 @@ def home():
     pnl_list = [p["pnl"] for p in priced if p["pnl"] is not None]
     total_pnl = round(sum(pnl_list) / len(pnl_list), 1) if pnl_list else 0
 
-    return render_template_string(
+    private = _private_figures(total_value)
+    html = render_template_string(
         DASHBOARD_TEMPLATE,
         positions=positions,
         data_source=source,
@@ -445,7 +501,32 @@ def home():
         losers=sum(1 for p in positions if p["status"] == "loss"),
         last_update=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         strict=_strict_figures(),
+        **private,
     )
+    response = make_response(html)
+    if private["private"] and request.args.get("key"):
+        response.set_cookie("dashboard_key", request.args["key"], max_age=30 * 24 * 3600,
+                            httponly=True, secure=True, samesite="Lax")
+    return response
+
+
+def _private_figures(total_value):
+    """Wallet value, cash and the trade journal, only for the owner's link
+    (/?key=DASHBOARD_KEY, then a cookie). The page is public otherwise."""
+    import hmac
+    expected = (os.environ.get("DASHBOARD_KEY") or "").strip()
+    given = request.args.get("key") or request.cookies.get("dashboard_key") or ""
+    if not expected:
+        return {"private": False, "private_hint": "لعرض قيمة المحفظة والكاش وما تعلمناه: أضف DASHBOARD_KEY في Render "
+                                                  "ثم افتح هذه الصفحة بـ ?key= وقيمته."}
+    if not hmac.compare_digest(given.encode(), expected.encode()):
+        return {"private": False, "private_hint": None}
+    import exposure
+    import paper_trading
+    cash = exposure.cash()
+    return {"private": True, "private_hint": None, "cash": cash,
+            "wallet_value": None if cash is None else cash + total_value,
+            "journal": paper_trading.journal_figures()}
 
 
 def _strict_figures():

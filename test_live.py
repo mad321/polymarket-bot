@@ -11,6 +11,7 @@ from datetime import timedelta
 from unittest import mock
 
 os.environ["ENABLE_MONITOR"] = "0"
+os.environ["JOURNAL"] = "0"  # the trade journal reads the network; its tests are in test_journal.py
 
 import live_feed as lf
 import paper_trading as pt
