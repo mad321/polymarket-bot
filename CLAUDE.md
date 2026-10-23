@@ -28,6 +28,10 @@ trading results. Add to it when you learn something (see "Lessons" below).
    - The bot only sells, never buys, and only after the owner taps
      "تأكيد البيع" in Telegram. Do not add automatic selling or buying
      without the owner's explicit decision in that session.
+     One exception, decided by the owner on 2026-10-23: `auto_stop.py` sells
+     a covered football position at its −20% stop by itself, only when
+     `AUTO_STOP=1` is set in Render. It never buys and never sells at the
+     take-profit.
    - Private keys live only in Render environment variables
      (`TRADING_PRIVATE_KEY`, `TRADING_PRIVATE_KEY_2`). Never ask for a key or
      the 12 words in chat, never log or return them; errors go through
@@ -38,7 +42,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 5. **Tests before every push**, and they must not touch the network:
 
    ```bash
-   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py
+   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py test_auto_stop.py
    ```
 
    A suite that suddenly takes seconds is calling the internet: mock it.
@@ -55,6 +59,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 | Ledger loop (every minute), Bitcoin paper model | `paper_trading.py`, ledger stored by `paper_store.py` as a file pinned in Telegram |
 | Football hybrid stop-loss: shadow test + alerts on real positions | `match_strategy.py` |
 | Strategy 3.0 "الميزان الصارم" paper test; ±20% alerts on real positions | `strict_strategy.py` (alerts in `match_strategy.position_alerts`) |
+| Automatic sale at the stop-loss (`AUTO_STOP=1`) | `auto_stop.py` |
 | Wiping paper trades (archive first, then clear) | `paper_trading.RESET_ID`, `wipe` |
 | Stop/target alert review (sell at alert vs hold) | `stop_review.py` |
 | Position size alert | `exposure.py` |

@@ -410,6 +410,7 @@ def alerts_status():
     """Is the monitor running, did the last alerts go out, and is selling set up?
     No secrets here."""
     import alerts
+    import auto_stop
     import exposure
     import match_strategy
     import strict_strategy
@@ -422,6 +423,7 @@ def alerts_status():
         "channels": alerts.status(),
         "telegram_commands": telegram_actions.STATE,
         "trading": trading.status(),
+        "auto_stop": auto_stop.status(),
         "paper_trading": paper_trading.STATE,
         "position_size": exposure.STATE,
         "match_test": match_strategy.STATE,
