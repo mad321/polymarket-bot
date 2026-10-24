@@ -60,7 +60,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 | Ledger loop (every minute), Bitcoin paper model | `paper_trading.py`, ledger stored by `paper_store.py` as a file pinned in Telegram |
 | Football hybrid stop-loss: shadow test + alerts on real positions | `match_strategy.py` |
 | Strategy 3.0 "الميزان الصارم" paper test (unchanged, all qualifying games) | `strict_strategy.py` |
-| Strategy 3.1 (live since 2026-10-24): one pick a day (highest volume), $5 (`SIGNAL_USD`), hold to the end; buy signal + morning list (`BUY_SIGNALS=0` off); no ±20% advice on real positions | `strict_strategy.morning` / `apply` (`pick`), `match_strategy.position_alerts` |
+| Strategy 3.1 (live since 2026-10-24): one pick a day (lowest in-range price; no pick rule beat zero in `research/pre_match_model`), $5 (`SIGNAL_USD`), hold to the end; buy signal + morning list (`BUY_SIGNALS=0` off); no ±20% advice on real positions | `strict_strategy.morning` / `apply` (`pick`), `match_strategy.position_alerts` |
 | Automatic sale at the stop-loss (`AUTO_STOP=1`) | `auto_stop.py` |
 | Live prices and scores (WebSockets): instant stops, goal-vs-price timing | `live_feed.py` (`LIVE_FEED=0` turns it off) |
 | Wiping paper trades (archive first, then clear) | `paper_trading.RESET_ID`, `wipe` |

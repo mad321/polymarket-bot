@@ -337,19 +337,20 @@ def morning(sec, games, now, tz):
                 continue
             fits = ENTRY_RANGE[0] <= ask <= ENTRY_RANGE[1]
             volume = game.get("volume", 0)
-            if fits and volume >= MIN_VOLUME and (best is None or volume > best[2]):
-                best = (game, s, volume)
+            if fits and volume >= MIN_VOLUME and (best is None or ask < best[2]):
+                best = (game, s, ask)
             rows.append(f"• {game['start'].astimezone(tz):%H:%M} {s['team']} ({game['title']}): "
                         f"{ask * 100:.0f}¢ {'✅ داخل النطاق' if fits else '〰️ قريب من النطاق'}، "
                         f"حجم ${volume:,.0f}{'' if volume >= MIN_VOLUME else ' ⚠️ أقل من $15,000 حتى الآن'}")
-    # Strategy 3.1: one trade a day, the candidate with the most volume (the
-    # deepest book, the least slippage). Not proven better; measured as "pick".
+    # Strategy 3.1: one trade a day, the in-range candidate with the lowest
+    # price. On 118 days of past candidates no pick rule beat zero; this one
+    # was closest (research/pre_match_model). Measured as "pick".
     sec["pick"] = ({"day": today, "slug": best[0]["slug"], "team": best[1]["team"],
                     "start": ms._iso(best[0]["start"])} if best else {"day": today})
     if not rows:
         return []
     head = (f"⭐ صفقة اليوم: {best[1]['team']} ({best[0]['title']}) الساعة {best[0]['start'].astimezone(tz):%H:%M}، "
-            f"الأعلى حجماً بين المرشحين. رسالة الشراء تصلك قبلها بربع ساعة إن بقي السعر بين 55¢ و72¢."
+            f"الأقل سعراً بين المرشحين. رسالة الشراء تصلك قبلها بربع ساعة إن بقي السعر بين 55¢ و72¢."
             if best else "لا صفقة مختارة اليوم: لا مرشح داخل النطاق بحجم $15,000 أو أكثر حتى الآن.")
     return ["\n".join([f"🗓️ مباريات مرشحة خلال 24 ساعة ({len(rows)}):"] + rows + [
         head, "صفقة واحدة فقط في اليوم، بـ $5، ونحتفظ بها حتى النهاية."])]

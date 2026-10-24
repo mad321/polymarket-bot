@@ -119,7 +119,7 @@ class StrictTests(unittest.TestCase):
             [text] = ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ)
         self.assertIn("بـ $24.80 (2% من قيمة محفظتك $1,240.00)", text)
 
-    def test_morning_picks_the_highest_volume_candidate(self):
+    def test_morning_picks_the_lowest_priced_candidate(self):
         def g(slug, start, home_ask, away_ask, volume=60000):
             x = game()
             x.update(slug=slug, start=start, volume=volume)
@@ -129,7 +129,7 @@ class StrictTests(unittest.TestCase):
         morning = KICKOFF.replace(hour=6)  # 9:00 in Riyadh
         games = [g("a", KICKOFF, 0.62, 0.15), g("b", KICKOFF + timedelta(hours=3), 0.76, 0.10, volume=9000),
                  g("c", KICKOFF, 0.40, 0.30), g("d", KICKOFF + timedelta(days=2), 0.62, 0.15),
-                 g("e", KICKOFF + timedelta(hours=1), 0.70, 0.15, volume=90000)]
+                 g("e", KICKOFF + timedelta(hours=1), 0.58, 0.15, volume=20000)]
         self.assertEqual(st.morning(self.sec, games, morning - timedelta(hours=1), TZ), [])  # before 9:00
         [text] = st.morning(self.sec, games, morning, TZ)
         self.assertIn("مباريات مرشحة خلال 24 ساعة (3)", text)
