@@ -10,8 +10,9 @@ strategy 3.0 alerts (match_strategy.covers), in a wallet the bot can sell
 from (trading.can_sell), once the shown price is 20% or more below your
 average buy price while the game is under way.
 
-How: every share, as a Fill-and-Kill order at the price the order book pays
-now (trading.quote / trading.sell, the same path as the sell button). When
+How: every share, as a Fill-and-Kill order down to SLIPPAGE (3¢) under the
+price the order book pays now (trading.quote / trading.sell, the same path
+as the sell button). When
 that price is far below the shown price (fewer than MIN_BOOK_RATIO of it,
 a thin book), it does not sell and tries again the next minute. After
 MAX_TRIES attempts without a sale it stops and tells you to sell by hand.
@@ -33,7 +34,11 @@ logger = logging.getLogger(__name__)
 
 MIN_BOOK_RATIO = Decimal("0.8")  # sell only if the book pays at least 80% of the shown price
 MAX_TRIES = 10
-RETRY_AFTER = 55  # seconds; the ledger loop runs every minute
+RETRY_AFTER = 15  # seconds between attempts while the price stays under the stop
+# Live sports orders wait ~3 s before matching. On Oct 24 a stop sale with
+# its minimum at the quoted price itself found the bids 1¢ lower after the
+# delay and sold nothing. The minimum now leaves this much room.
+SLIPPAGE = Decimal("0.03")
 
 STATE = {"enabled": False, "attempts": 0, "sold": 0, "last": None}
 
@@ -119,20 +124,40 @@ def attempt(key, name, mid):
         return _failed(key, q["name"], f"المشترون قليلون: أفضل سعر لكل الأسهم {q['price'] * 100:.0f}¢ "
                                        f"والسعر المعروض {shown * 100:.0f}¢", give_up)
     placed_at = time.time()
-    result = trading.sell(key, q["shares"], q["price"])
+    result = trading.sell(key, q["shares"], max(Decimal("0.01"), q["price"] - SLIPPAGE))
     STATE["last"] = {k: result.get(k) for k in ("at", "status", "ok", "dry_run")}
     if result.get("status") == "delayed" and result.get("order_id"):
         outcome = trading.await_delayed_fill(result["order_id"], result["asset_id"], placed_at,
                                              second=result.get("second", False))
+        if outcome is None:
+            outcome = _check_holding(key, q["shares"])  # the order's status never came: look at the shares
         if outcome and outcome["status"] == "matched":
             _finish(key, sold=True)
         elif outcome and outcome["status"] == "unfilled":
             return _failed(key, q["name"], "السعر نزل أثناء التنفيذ ولم يُبع شيء", give_up)
+        if outcome and outcome.get("received") is None:  # sold, amount not reported
+            return (f"🤖 بيع تلقائي عند وقف الخسارة\n✅ تم البيع: {q['name']}\n"
+                    f"بِيع {Decimal(outcome['sold']).normalize():f} سهم. المبلغ يظهر في بولي ماركت.")
         return "🤖 بيع تلقائي عند وقف الخسارة\n" + telegram_actions.delayed_outcome_text(result, outcome)
     if result.get("ok"):
         _finish(key, sold=True)
         return "🤖 بيع تلقائي عند وقف الخسارة\n" + telegram_actions.result_text(result)
     return _failed(key, q["name"], result.get("message") or result.get("status"), give_up)
+
+
+def _check_holding(key, shares):
+    """After an order whose outcome is unknown: still holding every share means
+    nothing sold; a smaller or missing position means it sold."""
+    import trading
+    try:
+        held = trading._find(key)["shares"]
+    except trading.TradingError as e:
+        if "لم أجد هذه الصفقة" in str(e):
+            return {"status": "matched", "sold": shares, "received": None}
+        return None
+    if held >= shares:
+        return {"status": "unfilled"}
+    return {"status": "matched", "sold": shares - held, "received": None}
 
 
 def _finish(key, sold=False):
