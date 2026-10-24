@@ -62,7 +62,7 @@ class AttemptTests(unittest.TestCase):
         with mock.patch("trading.quote", return_value=quote(0.43)), \
                 mock.patch("trading.sell", return_value=sold) as sell:
             text = auto_stop.attempt("k", "Chelsea", 0.45)
-        sell.assert_called_once_with("k", Decimal("44"), Decimal("0.43"))
+        sell.assert_called_once_with("k", Decimal("44"), Decimal("0.40"))  # 3¢ of room for the delay
         self.assertIn("🤖 بيع تلقائي عند وقف الخسارة", text)
         self.assertIn("✅ تم البيع", text)
         self.assertIn("k", auto_stop._done)
@@ -77,6 +77,27 @@ class AttemptTests(unittest.TestCase):
         self.assertIn("سأحاول كل دقيقة", first)
         self.assertEqual(set(quiet), {None})
         self.assertIn("توقف البيع التلقائي", last)
+        self.assertIn("k", auto_stop._done)
+
+    def test_unknown_outcome_is_settled_by_the_shares_still_held(self):
+        # Oct 24, Como: delayed order, no status within a minute, all 16 shares still held
+        delayed = {"ok": True, "status": "delayed", "order_id": "0x5073", "asset_id": "yH",
+                   "name": "Will Como 1907 win on 2026-10-24? — Yes", "min_price": "0.50", "second": True}
+        with mock.patch("trading.quote", return_value=quote(0.53, current=0.525, shares="16")), \
+                mock.patch("trading.sell", return_value=delayed), \
+                mock.patch("trading.await_delayed_fill", return_value=None), \
+                mock.patch("trading._find", return_value={"shares": Decimal("16")}):
+            text = auto_stop.attempt("k", "Como", 0.525)
+        self.assertIn("السعر نزل أثناء التنفيذ ولم يُبع شيء", text)
+        self.assertNotIn("k", auto_stop._done)  # tried again while under the stop
+        auto_stop._tries.clear()
+        with mock.patch("trading.quote", return_value=quote(0.53, current=0.525, shares="16")), \
+                mock.patch("trading.sell", return_value=delayed), \
+                mock.patch("trading.await_delayed_fill", return_value=None), \
+                mock.patch("trading._find", side_effect=trading.TradingError("لم أجد هذه الصفقة")):
+            text = auto_stop.attempt("k", "Como", 0.525)
+        self.assertIn("✅ تم البيع", text)
+        self.assertIn("بِيع 16 سهم", text)
         self.assertIn("k", auto_stop._done)
 
     def test_a_position_already_gone_ends_quietly(self):
@@ -97,13 +118,13 @@ class AttemptTests(unittest.TestCase):
         self.assertIn("✅ تم البيع", text)
         self.assertIn("k", auto_stop._done)
 
-    def test_request_does_not_repeat_within_a_minute_or_after_the_sale(self):
+    def test_request_does_not_repeat_within_15_seconds_or_after_the_sale(self):
         with mock.patch("auto_stop._start"):
             self.assertTrue(auto_stop.request(my_pos(wallet=BOT), 0.45, now=1000))
-            self.assertFalse(auto_stop.request(my_pos(wallet=BOT), 0.45, now=1010))  # queued already
+            self.assertFalse(auto_stop.request(my_pos(wallet=BOT), 0.45, now=1005))  # queued already
             auto_stop._busy.clear()
-            self.assertFalse(auto_stop.request(my_pos(wallet=BOT), 0.45, now=1030))  # too soon
-            self.assertTrue(auto_stop.request(my_pos(wallet=BOT), 0.45, now=1060))
+            self.assertFalse(auto_stop.request(my_pos(wallet=BOT), 0.45, now=1010))  # too soon
+            self.assertTrue(auto_stop.request(my_pos(wallet=BOT), 0.45, now=1016))
             auto_stop._busy.clear()
             auto_stop._done.add(trading.position_key("yH", BOT))
             self.assertFalse(auto_stop.request(my_pos(wallet=BOT), 0.45, now=2000))
