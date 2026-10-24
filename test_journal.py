@@ -158,6 +158,12 @@ class PrivatePageTests(unittest.TestCase):
         self.assertNotIn("قيمة المحفظة الآن", html)
         html = self.get("/?key=wrong", {"DASHBOARD_KEY": "s3cret"}).get_data(as_text=True)
         self.assertNotIn("812.50", html)
+        self.assertIn("الكلمة في الرابط لا تطابق DASHBOARD_KEY", html)
+        self.assertNotIn("s3cret", html)
+
+    def test_spaces_and_invisible_marks_around_the_key_are_ignored(self):
+        html = self.get("/?key=%20s3cret%E2%80%8E", {"DASHBOARD_KEY": " s3cret\n"}).get_data(as_text=True)
+        self.assertIn("$812.50", html)
 
     def test_says_how_when_no_key_is_set(self):
         os.environ.pop("DASHBOARD_KEY", None)

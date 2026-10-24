@@ -538,7 +538,7 @@ def home():
     )
     response = make_response(html)
     if private["private"] and request.args.get("key"):
-        response.set_cookie("dashboard_key", request.args["key"], max_age=30 * 24 * 3600,
+        response.set_cookie("dashboard_key", request.args["key"].strip(), max_age=30 * 24 * 3600,
                             httponly=True, secure=True, samesite="Lax")
     return response
 
@@ -547,13 +547,19 @@ def _private_figures(total_value):
     """Wallet value, cash and the trade journal, only for the owner's link
     (/?key=DASHBOARD_KEY, then a cookie). The page is public otherwise."""
     import hmac
-    expected = (os.environ.get("DASHBOARD_KEY") or "").strip()
-    given = request.args.get("key") or request.cookies.get("dashboard_key") or ""
+    clean = lambda v: (v or "").strip(" \t\r\n\"'`\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e")
+    expected = clean(os.environ.get("DASHBOARD_KEY"))
+    typed = clean(request.args.get("key"))
+    given = typed or clean(request.cookies.get("dashboard_key"))
     if not expected:
         return {"private": False, "private_hint": "لعرض قيمة المحفظة والكاش وما تعلمناه: أضف DASHBOARD_KEY في Render "
                                                   "ثم افتح هذه الصفحة بـ ?key= وقيمته."}
     if not hmac.compare_digest(given.encode(), expected.encode()):
-        return {"private": False, "private_hint": None}
+        hint = None
+        if typed:  # say why, without saying anything about the key itself
+            hint = ("🔒 الكلمة في الرابط لا تطابق DASHBOARD_KEY في Render. استخدم حروفاً إنجليزية وأرقاماً فقط "
+                    "(بلا مسافات ولا رموز مثل + # & %)، وتأكد أن الرابط ينتهي بـ ?key= ثم الكلمة نفسها.")
+        return {"private": False, "private_hint": hint}
     import exposure
     import paper_trading
     cash = exposure.cash()
