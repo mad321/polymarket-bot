@@ -531,12 +531,10 @@ def apply(ledger, data, now, tz):
 # ─── ALERTS ON YOUR POSITIONS ────────────────────────────────────────────────
 
 ALERTS_INTRO = (
-    "🛡️ تنبيهات صفقاتك الحقيقية تتبع الآن الميزان الصارم 3.0.\n"
-    "لكل صفقة \"هل سيفوز الفريق؟ نعم\" في الدوريات المختارة، يتابع البوت المباراة كل دقيقة ويرسل تنبيهاً عند: "
-    "وصول السعر إلى +20% من سعر شرائك (الهدف)، أو نزوله 20% عنه (الوقف). "
-    "لا تنبيه بالدقيقة 65 ولا عند الهدف بعد الآن.\n"
-    "كل تنبيه مرة واحدة، ومعه كم ستستلم لو بعت الآن. صفقات محفظة البوت يأتي معها زر البيع. "
-    "البوت لا يبيع ولا يضع أوامر بنفسه."
+    "⭐ الاستراتيجية 3.1: نحتفظ بالصفقة حتى نهاية المباراة.\n"
+    "توقفت تنبيهات +20% و−20% على صفقاتك: سجلك يقول إن البيع المبكر عند الربح والبيع عند الهبوط "
+    "كلّفاك أكثر من الاحتفاظ. حجم الصفقة الصغير ($5) هو وقف الخسارة.\n"
+    "إن كان البيع التلقائي عند −20% مفعلاً (AUTO_STOP=1) فسيستمر ويُبلغك، وننصح بإطفائه: AUTO_STOP=0 في Render."
 )
 
 
@@ -555,8 +553,8 @@ def position_alerts(ledger, data, now):
     """Alerts on your covered positions, each rule once per position."""
     sec = section(ledger)
     messages = []
-    if not sec.get("alerts_intro_v3"):
-        sec["alerts_intro_v3"] = _iso(now)
+    if not sec.get("alerts_intro_v31"):
+        sec["alerts_intro_v31"] = _iso(now)
         messages.append(ALERTS_INTRO)
     sent = sec.setdefault("alerted", {})
     for key, at in list(sent.items()):
@@ -569,10 +567,11 @@ def position_alerts(ledger, data, now):
             continue
         book = data["books"].get(token) or {}
         rule = alert_rule(float(pos.get("buy_price") or 0) / 100, game, mid_price(book))
-        if rule is None:
+        # Strategy 3.1 (2026-10-24) holds to the end: no +20% / -20% advice. Only a
+        # stop the bot is selling by itself (AUTO_STOP=1) is announced.
+        if rule != "stop" or not auto_stop.applies(pos):
             continue
-        if rule == "stop" and auto_stop.applies(pos):
-            auto_stop.request(pos, mid_price(book))  # retried every minute until sold
+        auto_stop.request(pos, mid_price(book))  # retried until sold
         key = f"{pos.get('wallet', '')}:{token}:{rule}"
         if key in sent:
             continue

@@ -214,6 +214,14 @@ def signals_enabled():
     return (os.environ.get("BUY_SIGNALS") or "").strip() != "0"
 
 
+def signal_usd():
+    """Strategy 3.1 (owner, 2026-10-24): $5 a trade. SIGNAL_USD=0 sizes by SIGNAL_PCT."""
+    try:
+        return float(os.environ.get("SIGNAL_USD") or 5)
+    except ValueError:
+        return 5.0
+
+
 def signal_pct():
     try:
         return float(os.environ.get("SIGNAL_PCT") or 2)
@@ -225,7 +233,10 @@ def signal(trade, game, settled, now, capital=None):
     """The Telegram suggestion to buy what the paper test just bought, sized
     at signal_pct() of the wallets' value (the paper stake when unknown)."""
     minutes = max(0, round((game["start"] - now).total_seconds() / 60))
-    if capital:
+    if signal_usd() > 0:
+        amount = signal_usd()
+        size = f"${amount:g}"
+    elif capital:
         amount = round(capital * signal_pct() / 100, 2)
         size = f"${amount:.2f} ({signal_pct():g}% من قيمة محفظتك ${capital:,.2f})"
     else:
@@ -233,13 +244,13 @@ def signal(trade, game, settled, now, capital=None):
         size = f"${amount:g} (تعذّرت قراءة قيمة محفظتك الآن)"
     shares = amount / trade["entry_price"]
     return "\n".join([
-        "🟢 فرصة شراء: الميزان الصارم 3.0",
+        "⭐ صفقة اليوم: الاستراتيجية 3.1",
         f"{trade['title']}: تبدأ بعد {minutes} دقيقة",
         f"الفريق: {trade['team']}، السعر الآن حوالي {trade['entry_price'] * 100:.1f}¢ "
         f"(حجم تداول المباراة ${trade['volume']:,.0f})",
         f"اشترِ \"نعم\" بـ {size}، أي حوالي {shares:.0f} سهم.",
-        f"بعد الشراء: البوت يبيع تلقائياً إن نزل السعر إلى {trade['stop'] * 100:.1f}¢ (−20%)، "
-        f"ويرسل لك زر البيع عند {trade['target'] * 100:.1f}¢ (+20%).",
+        "احتفظ حتى نهاية المباراة: لا تبع عند الهبوط ولا عند الربح. "
+        "حجم الصفقة الصغير هو وقف الخسارة: أسوأ حالة أن تخسر المبلغ كله.",
         f"⚠️ الاستراتيجية ما زالت تحت الاختبار: {settled} صفقة محسومة، والحكم بعد 30. القرار لك.",
         f"https://polymarket.com/event/{trade['slug']}",
     ])
@@ -251,8 +262,17 @@ def apply(sec, data, now):
     games, books = data["games"], data["books"]
     messages = []
     for slug in data.get("candidates", []):
-        if slug in games and enter(sec, games[slug], books, now) and signals_enabled():
-            messages.append(signal(sec["open"][-1], games[slug], len(sec["closed"]), now, data.get("capital")))
+        if slug not in games or not enter(sec, games[slug], books, now):
+            continue
+        trade = sec["open"][-1]
+        pick = sec.get("pick") or {}
+        if pick.get("slug") == slug and pick.get("team") == trade["team"]:
+            trade["pick"] = True  # the day's one trade (strategy 3.1)
+            last = sec.get("last_signal_at")
+            if signals_enabled() and (last is None or now - ms._parse_time(last) >= timedelta(hours=24)):
+                sec["last_signal_at"] = ms._iso(now)
+                messages.append(signal(trade, games[slug], len([t for t in sec["closed"] if t.get("pick")]),
+                                       now, data.get("capital")))
     for slug in data.get("started", []):
         game = ms._schedule.get(slug)
         if game:
@@ -307,7 +327,7 @@ def morning(sec, games, now, tz):
     if local.hour < ms.DIGEST_HOUR or sec.get("morning_day") == today:
         return []
     sec["morning_day"] = today
-    rows = []
+    rows, best = [], None
     for game in sorted(games, key=lambda g: g["start"]):
         if not now < game["start"] <= now + timedelta(hours=24):
             continue
@@ -317,14 +337,22 @@ def morning(sec, games, now, tz):
                 continue
             fits = ENTRY_RANGE[0] <= ask <= ENTRY_RANGE[1]
             volume = game.get("volume", 0)
+            if fits and volume >= MIN_VOLUME and (best is None or volume > best[2]):
+                best = (game, s, volume)
             rows.append(f"• {game['start'].astimezone(tz):%H:%M} {s['team']} ({game['title']}): "
                         f"{ask * 100:.0f}¢ {'✅ داخل النطاق' if fits else '〰️ قريب من النطاق'}، "
                         f"حجم ${volume:,.0f}{'' if volume >= MIN_VOLUME else ' ⚠️ أقل من $15,000 حتى الآن'}")
+    # Strategy 3.1: one trade a day, the candidate with the most volume (the
+    # deepest book, the least slippage). Not proven better; measured as "pick".
+    sec["pick"] = ({"day": today, "slug": best[0]["slug"], "team": best[1]["team"],
+                    "start": ms._iso(best[0]["start"])} if best else {"day": today})
     if not rows:
         return []
-    return ["\n".join([f"🗓️ مباريات مرشحة للميزان الصارم خلال 24 ساعة ({len(rows)}):"] + rows + [
-        "هذه قائمة للتخطيط، لا للشراء. الأسعار تتغير والتشكيلة تُعلن قبل المباراة بساعة تقريباً. "
-        "رسالة الشراء تصلك قبل البداية بربع ساعة إذا بقي السعر بين 55¢ و72¢."])]
+    head = (f"⭐ صفقة اليوم: {best[1]['team']} ({best[0]['title']}) الساعة {best[0]['start'].astimezone(tz):%H:%M}، "
+            f"الأعلى حجماً بين المرشحين. رسالة الشراء تصلك قبلها بربع ساعة إن بقي السعر بين 55¢ و72¢."
+            if best else "لا صفقة مختارة اليوم: لا مرشح داخل النطاق بحجم $15,000 أو أكثر حتى الآن.")
+    return ["\n".join([f"🗓️ مباريات مرشحة خلال 24 ساعة ({len(rows)}):"] + rows + [
+        head, "صفقة واحدة فقط في اليوم، بـ $5، ونحتفظ بها حتى النهاية."])]
 
 
 def digest(sec, now, tz):
@@ -349,6 +377,7 @@ def dashboard(sec):
     pnl = sum(t.get("pnl", 0) for t in closed)
     hold = sum(t.get("hold_pnl", 0) for t in closed)
     wins = sum(t.get("pnl", 0) > 0 for t in closed)
+    picks = [t for t in closed if t.get("pick")]
     rows = []
     for t, is_open in ([(t, True) for t in sorted(sec.get("open", []), key=lambda t: t["start"], reverse=True)]
                        + [(t, False) for t in sorted(closed, key=lambda t: t.get("closed_at", ""), reverse=True)]):
@@ -371,6 +400,9 @@ def dashboard(sec):
             "skipped_volume": skipped.get("volume", 0), "skipped_price": skipped.get("price", 0),
             "goal": WIN_RATE_GOAL * 100, "break_even": 57, "rows": rows,
             "indicators": {
+                "pick": trade_journal.indicator(
+                    len(picks), sum(t.get("hold_pnl", 0) > 0 for t in picks), sum(t.get("hold_pnl", 0) for t in picks),
+                    sum(t["cost"] + t["fee"] for t in picks)),
                 "strategy": trade_journal.indicator(len(closed), wins, pnl, paid),
                 "hold": trade_journal.indicator(len(closed), sum(t.get("hold_pnl", 0) > 0 for t in closed), hold, paid),
             }}

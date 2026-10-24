@@ -76,32 +76,50 @@ class StrictTests(unittest.TestCase):
         self.assertEqual((t["target"], t["stop"]), (0.744, 0.496))
         self.assertEqual(self.ledger["match_test"]["open"], [])  # the hybrid test is off here
 
-    def test_an_entry_is_sent_as_a_buy_signal_once(self):
+    def pick(self, slug=SLUG, team="Chelsea FC"):
+        self.sec["pick"] = {"day": "2026-10-10", "slug": slug, "team": team}
+
+    def test_only_the_day_s_pick_is_sent_as_a_5_dollar_hold_signal(self):
+        self.pick()
         data = {"games": {SLUG: game()}, "candidates": [SLUG], "started": [], "payouts": {}, "error": None,
-                "books": {"yH": book(0.61, 0.62), "yA": book(0.14, 0.15)}}
+                "books": {"yH": book(0.61, 0.62), "yA": book(0.14, 0.15)}, "capital": 1240.0}
         msgs = ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ)
         self.assertEqual(len(msgs), 1)
         text = msgs[0]
-        self.assertIn("🟢 فرصة شراء: الميزان الصارم 3.0", text)
+        self.assertIn("⭐ صفقة اليوم: الاستراتيجية 3.1", text)
         self.assertIn("Chelsea FC vs. AFC Bournemouth: تبدأ بعد 12 دقيقة", text)
         self.assertIn("السعر الآن حوالي 62.0¢", text)
-        self.assertIn("بـ $25 (تعذّرت قراءة قيمة محفظتك الآن)، أي حوالي 40 سهم", text)
-        self.assertIn("إن نزل السعر إلى 49.6¢ (−20%)", text)
-        self.assertIn("عند 74.4¢ (+20%)", text)
-        self.assertIn("0 صفقة محسومة، والحكم بعد 30", text)
+        self.assertIn("اشترِ \"نعم\" بـ $5، أي حوالي 8 سهم", text)
+        self.assertIn("احتفظ حتى نهاية المباراة", text)
         self.assertIn("https://polymarket.com/event/" + SLUG, text)
+        self.assertTrue(self.sec["open"][0]["pick"])
+        self.assertEqual(self.sec["open"][0]["shares"], 40.32)  # the paper test keeps $25
         self.assertEqual(ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=11), TZ), [])
 
-    def test_the_signal_is_sized_at_2_percent_of_the_wallets(self):
+    def test_no_signal_for_a_game_that_is_not_the_pick(self):
+        self.pick(slug="another-game")
+        data = {"games": {SLUG: game()}, "candidates": [SLUG], "started": [], "payouts": {}, "error": None,
+                "books": {"yH": book(0.61, 0.62), "yA": book(0.14, 0.15)}}
+        self.assertEqual(ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ), [])
+        self.assertEqual(len(self.sec["open"]), 1)  # the paper test still bought
+        self.assertNotIn("pick", self.sec["open"][0])
+
+    def test_at_most_one_signal_in_24_hours(self):
+        self.pick()
+        self.sec["last_signal_at"] = (KICKOFF - timedelta(hours=20)).isoformat()
+        data = {"games": {SLUG: game()}, "candidates": [SLUG], "started": [], "payouts": {}, "error": None,
+                "books": {"yH": book(0.61, 0.62), "yA": book(0.14, 0.15)}}
+        self.assertEqual(ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ), [])
+
+    def test_sizing_by_percent_when_the_fixed_amount_is_off(self):
+        self.pick()
         data = {"games": {SLUG: game()}, "candidates": [SLUG], "started": [], "payouts": {}, "error": None,
                 "books": {"yH": book(0.61, 0.62), "yA": book(0.14, 0.15)}, "capital": 1240.0}
-        [text] = ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ)
-        self.assertIn("بـ $24.80 (2% من قيمة محفظتك $1,240.00)، أي حوالي 40 سهم", text)
-        self.assertEqual(self.sec["open"][0]["shares"], 40.32)  # the paper test keeps $25
-        with mock.patch.dict(os.environ, {"SIGNAL_PCT": "3"}):
-            self.assertIn("$37.20 (3% من", st.signal(self.sec["open"][0], game(), 0, KICKOFF, 1240.0))
+        with mock.patch.dict(os.environ, {"SIGNAL_USD": "0"}):
+            [text] = ms.apply(self.ledger, data, KICKOFF - timedelta(minutes=12), TZ)
+        self.assertIn("بـ $24.80 (2% من قيمة محفظتك $1,240.00)", text)
 
-    def test_morning_list_of_the_day_once(self):
+    def test_morning_picks_the_highest_volume_candidate(self):
         def g(slug, start, home_ask, away_ask, volume=60000):
             x = game()
             x.update(slug=slug, start=start, volume=volume)
@@ -110,15 +128,19 @@ class StrictTests(unittest.TestCase):
             return x
         morning = KICKOFF.replace(hour=6)  # 9:00 in Riyadh
         games = [g("a", KICKOFF, 0.62, 0.15), g("b", KICKOFF + timedelta(hours=3), 0.76, 0.10, volume=9000),
-                 g("c", KICKOFF, 0.40, 0.30), g("d", KICKOFF + timedelta(days=2), 0.62, 0.15)]
+                 g("c", KICKOFF, 0.40, 0.30), g("d", KICKOFF + timedelta(days=2), 0.62, 0.15),
+                 g("e", KICKOFF + timedelta(hours=1), 0.70, 0.15, volume=90000)]
         self.assertEqual(st.morning(self.sec, games, morning - timedelta(hours=1), TZ), [])  # before 9:00
         [text] = st.morning(self.sec, games, morning, TZ)
-        self.assertIn("مباريات مرشحة للميزان الصارم خلال 24 ساعة (2)", text)
+        self.assertIn("مباريات مرشحة خلال 24 ساعة (3)", text)
         self.assertIn("• 17:00 Chelsea FC (Chelsea FC vs. AFC Bournemouth): 62¢ ✅ داخل النطاق، حجم $60,000", text)
         self.assertIn("76¢ 〰️ قريب من النطاق، حجم $9,000 ⚠️ أقل من $15,000 حتى الآن", text)
+        self.assertIn("⭐ صفقة اليوم: Chelsea FC (Chelsea FC vs. AFC Bournemouth) الساعة 18:00", text)
+        self.assertEqual((self.sec["pick"]["slug"], self.sec["pick"]["team"]), ("e", "Chelsea FC"))
         self.assertEqual(st.morning(self.sec, games, morning + timedelta(hours=2), TZ), [])  # once a day
         sec2 = st.section(pt.new_ledger(KICKOFF))
         self.assertEqual(st.morning(sec2, [games[2]], morning, TZ), [])  # nothing to list: no message
+        self.assertNotIn("slug", sec2["pick"])
         with mock.patch.dict(os.environ, {"BUY_SIGNALS": "0"}):
             self.assertEqual(st.morning(st.section(pt.new_ledger(KICKOFF)), games, morning, TZ), [])
 

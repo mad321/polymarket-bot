@@ -315,43 +315,19 @@ class PositionAlertTests(unittest.TestCase):
         self.assertEqual([(p["id"], p["_side"], p["_game"]["slug"]) for p in found],
                          [("yH", "home", "epl-che-bou-2026-10-10")])
 
-    def test_intro_once_then_each_rule_once_per_position(self):
+    def test_since_3_1_no_advice_without_the_automatic_stop(self):
         msgs = self.run_tick(my_pos(), 10, 0.55, 0.57, score="0-0", elapsed="10", period="1H")
         self.assertEqual(len(msgs), 1)
-        self.assertIn("تتبع الآن الميزان الصارم 3.0", msgs[0])
-        msgs = self.run_tick(my_pos(), 30, 0.41, 0.43, score="0-1", elapsed="30", period="1H")  # 42 <= 57 × 0.8
-        self.assertEqual(len(msgs), 1)
-        text = msgs[0]
-        self.assertIn("🔴 الميزان الصارم: سعر Chelsea FC نزل 20% عن سعر شرائك", text)
-        self.assertIn("Chelsea FC vs. AFC Bournemouth: 0-1 (الدقيقة 30)", text)
-        self.assertIn("سعر شرائك 57¢، والسعر الآن 42.0¢", text)
-        self.assertIn("بيع 30 سهم الآن", text)
-        self.assertIn("لا مشترين لباقي الأسهم (14)", text)
-        self.assertIn("المحفظة الرئيسية", text)
-        self.assertIn("https://polymarket.com/event/epl-che-bou-2026-10-10", text)
-        self.assertEqual(self.run_tick(my_pos(), 31, 0.40, 0.42, score="0-1", elapsed="31", period="1H"), [])
-        msgs = self.run_tick(my_pos(), 50, 0.75, 0.77, score="1-1", elapsed="50", period="2H")  # 76 >= 57 × 1.2
-        self.assertIn("🟢 الميزان الصارم: سعر Chelsea FC وصل +20% فوق سعر شرائك", msgs[0])
-        self.assertIn("بولي ماركت يمسح الأوامر عند بداية المباراة", msgs[0])
-        self.assertEqual(ms.STATE["alerts_sent"], 2)
-
-    def test_no_time_stop_and_no_goal_alert_since_3_0(self):
-        self.run_tick(my_pos(), 10, 0.55, 0.57, score="0-0", elapsed="10", period="1H")
-        self.assertEqual(self.run_tick(my_pos(), 80, 0.50, 0.52, score="0-0", elapsed="66", period="2H"), [])
-        self.assertEqual(self.run_tick(my_pos(), 85, 0.60, 0.62, score="1-0", elapsed="70", period="2H"), [])
+        self.assertIn("الاستراتيجية 3.1: نحتفظ بالصفقة حتى نهاية المباراة", msgs[0])
+        self.assertEqual(self.run_tick(my_pos(), 30, 0.41, 0.43, score="0-1", elapsed="30", period="1H"), [])  # -20%
+        self.assertEqual(self.run_tick(my_pos(), 50, 0.75, 0.77, score="1-1", elapsed="50", period="2H"), [])  # +20%
+        self.assertEqual(ms.STATE["alerts_sent"], 0)
 
     def test_old_ledger_gets_the_new_intro_once(self):
-        ms.section(self.ledger)["alerts_intro"] = "2026-10-10T00:00:00+00:00"  # sent under the old rules
+        ms.section(self.ledger)["alerts_intro_v3"] = "2026-10-20T00:00:00+00:00"  # sent under 3.0
         msgs = self.run_tick(my_pos(), 10, 0.55, 0.57, score="0-0", elapsed="10", period="1H")
-        self.assertIn("تتبع الآن الميزان الصارم 3.0", msgs[0])
+        self.assertIn("الاستراتيجية 3.1", msgs[0])
         self.assertEqual(self.run_tick(my_pos(), 11, 0.55, 0.57, score="0-0", elapsed="11", period="1H"), [])
-
-    def test_bot_wallet_alert_comes_with_the_sell_button(self):
-        self.run_tick(my_pos(), 10, 0.55, 0.57, score="0-0", elapsed="10", period="1H")
-        msgs = self.run_tick(my_pos(wallet=BOT), 30, 0.41, 0.43, score="0-1", elapsed="30", period="1H")
-        text, markup = msgs[0]
-        self.assertIn("محفظة البوت", text)
-        self.assertEqual(markup["inline_keyboard"][0][0]["text"], "🔴 بيع الآن")
 
     def test_monitor_skips_generic_levels_for_covered_positions(self):
         import polymarket_monitor as monitor
