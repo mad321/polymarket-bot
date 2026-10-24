@@ -418,6 +418,42 @@ DASHBOARD_TEMPLATE = """
     </section>
     {% endif %}
 
+    {% if trial %}
+    <section class="strict">
+        <div class="section-title">
+            <h2>🧪 تجربة {{ trial.target }} مباراة · على الورق</h2>
+            <span>لا شراء ولا بيع حقيقي حتى نهايتها · $25 لكل مباراة · نفس المباريات لكل الطرق</span>
+        </div>
+        <div class="ind" style="margin-bottom:14px">
+            <div class="row" style="margin-top:0"><h3>التقدم</h3><span class="chip {% if trial.done %}good{% else %}wait{% endif %}">{% if trial.done %}انتهت{% else %}جارية{% endif %}</span></div>
+            <div class="row"><span class="lbl">مباريات دخلت</span><span class="num">{{ trial.entered }} / {{ trial.target }}</span></div>
+            <div class="row"><span class="lbl">حُسمت</span><span class="num">{{ trial.settled }}</span></div>
+            <div class="bar"><div style="width: {{ (trial.settled / trial.target * 100)|round|int }}%"></div></div>
+            {% if not trial.odds %}<div class="why" style="margin:10px 0 0">مقارنة مكاتب المراهنات متوقفة: أضف ODDS_API_KEY في Render.</div>{% endif %}
+        </div>
+        {% if trial.rows %}
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>الطريقة</th><th>مباريات</th><th>ربح</th><th>الصافي</th><th>العائد للصفقة</th><th>المدى</th></tr></thead>
+                <tbody>
+                {% for r in trial.rows %}{% if r.n %}
+                <tr>
+                    <td>{{ r.label }}</td>
+                    <td class="num">{{ r.n }}</td>
+                    <td class="num">{{ r.wins }}</td>
+                    <td class="num {% if r.net >= 0 %}pos{% else %}neg{% endif %}">{% if r.net >= 0 %}+${{ "%.2f"|format(r.net) }}{% else %}-${{ "%.2f"|format(-r.net) }}{% endif %}</td>
+                    <td class="num {% if r.roi >= 0 %}pos{% else %}neg{% endif %}">{{ "%+.1f"|format(r.roi * 100) }}%</td>
+                    <td class="num">{% if r.range is not none %}±{{ "%.1f"|format(r.range * 100) }}%{% else %}—{% endif %}</td>
+                </tr>
+                {% endif %}{% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="note">الطريقة التي يقع مداها كله فوق الصفر هي فقط ما يستحق المال. "أمر محدد" يفترض أن الأمر نُفّذ، فهو أفضل حالة.</div>
+        {% endif %}
+    </section>
+    {% endif %}
+
     <section class="strict">
         <div class="section-title">
             <h2>🛡️ الميزان الصارم 3.0 · تجربة على الورق</h2>
@@ -535,6 +571,7 @@ def home():
         losers=sum(1 for p in positions if p["status"] == "loss"),
         last_update=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         strict=_strict_figures(),
+        trial=_trial_figures(),
         **private,
     )
     response = make_response(html)
@@ -567,6 +604,16 @@ def _private_figures(total_value):
     return {"private": True, "private_hint": None, "cash": cash,
             "wallet_value": None if cash is None else cash + total_value,
             "journal": paper_trading.journal_figures()}
+
+
+def _trial_figures():
+    """The 70-match trial for the page, or None until the ledger is loaded."""
+    import paper_trading
+    import trial
+    ledger = paper_trading.public_ledger()
+    if ledger is None or not trial.enabled():
+        return None
+    return trial.dashboard(ledger.get("trial") or {})
 
 
 def _strict_figures():
@@ -605,6 +652,8 @@ def alerts_status():
     import alerts
     import auto_stop
     import live_feed
+    import odds
+    import trial
     import exposure
     import match_strategy
     import strict_strategy
@@ -619,6 +668,8 @@ def alerts_status():
         "trading": trading.status(),
         "auto_stop": auto_stop.status(),
         "live_feed": live_feed.status(),
+        "trial": trial.STATE,
+        "odds": {**odds.STATE, "enabled": odds.enabled()},
         "paper_trading": paper_trading.STATE,
         "position_size": exposure.STATE,
         "match_test": match_strategy.STATE,

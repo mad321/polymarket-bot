@@ -51,6 +51,8 @@ import live_feed
 import positions as positions_module
 import stop_review
 import strict_strategy
+import trial
+import odds
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +141,7 @@ def alerts_enabled():
 
 
 def active():
-    return enabled() or alerts_enabled() or strict_strategy.enabled()
+    return enabled() or alerts_enabled() or strict_strategy.enabled() or trial.enabled()
 
 
 def covers(pos):
@@ -314,6 +316,11 @@ def plan(ledger, now):
         settle += strict["settle"]
         # a game is still a candidate while either test has not decided on it
         entered = strict["entered"] if entered is None else entered & strict["entered"]
+    if trial.enabled():
+        t = trial.plan(ledger, now)
+        live.update(t["live"])
+        settle += t["settle"]
+        entered = t["entered"] if entered is None else entered & t["entered"]
     return {"live": live, "settle": settle, "entered": entered or set()}
 
 
@@ -324,10 +331,12 @@ def fetch(plan_, now):
     try:
         if _schedule_at is None or now - _schedule_at >= SCHEDULE_EVERY:
             _schedule, _schedule_at = fetch_schedule(now), now
-        testing = enabled() or strict_strategy.enabled()
+        testing = enabled() or strict_strategy.enabled() or trial.enabled()
         candidates = [g for g in _schedule.values() if testing
                       and g["slug"] not in plan_["entered"] and g["start"] - ENTRY_WINDOW <= now < g["start"]]
         data["candidates"] = [g["slug"] for g in candidates]
+        if trial.enabled() and odds.enabled():  # bookmakers' chances for the trial's edge
+            data["odds"] = {g["slug"]: odds.lookup(g) for g in candidates}
         if candidates and strict_strategy.enabled() and strict_strategy.signals_enabled():
             import exposure
             data["capital"] = exposure.capital()  # sizes the buy signals
@@ -479,6 +488,8 @@ def apply(ledger, data, now, tz):
         messages += strict_strategy.apply(strict, data, now)  # buy signals
         messages += strict_strategy.morning(strict, _schedule.values(), now, tz)
         messages += strict_strategy.digest(strict, now, tz)
+    if trial.enabled():
+        messages += trial.apply(ledger, data, now, tz)
     if not enabled():
         STATE.update(last_scan_at=_iso(now))
         return messages

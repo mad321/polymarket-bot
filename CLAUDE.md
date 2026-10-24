@@ -43,7 +43,7 @@ trading results. Add to it when you learn something (see "Lessons" below).
 5. **Tests before every push**, and they must not touch the network:
 
    ```bash
-   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py test_auto_stop.py test_restore.py test_live.py test_journal.py
+   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py test_auto_stop.py test_restore.py test_live.py test_journal.py test_trial.py
    ```
 
    A suite that suddenly takes seconds is calling the internet: mock it.
@@ -61,6 +61,9 @@ trading results. Add to it when you learn something (see "Lessons" below).
 | Football hybrid stop-loss: shadow test + alerts on real positions | `match_strategy.py` |
 | Strategy 3.0 "الميزان الصارم" paper test (unchanged, all qualifying games) | `strict_strategy.py` |
 | Strategy 3.1 (live since 2026-10-24): one pick a day (lowest in-range price; no pick rule beat zero in `research/pre_match_model`), $5 (`SIGNAL_USD`), hold to the end; buy signal + morning list (`BUY_SIGNALS=0` off); no ±20% advice on real positions | `strict_strategy.morning` / `apply` (`pick`), `match_strategy.position_alerts` |
+| 70-match paper trial (since 2026-10-24): no real buying or selling until it ends; hold / maker / ±20% / bookmaker-edge compared on the same matches; buy signals off meanwhile | `trial.py` (`TRIAL=0` off) |
+| Bookmaker odds (The Odds API, Pinnacle) for the trial's edge | `odds.py` (`ODDS_API_KEY`) |
+| Pre-match prediction research (no edge over the price) | `research/pre_match_model/` |
 | Automatic sale at the stop-loss (`AUTO_STOP=1`) | `auto_stop.py` |
 | Live prices and scores (WebSockets): instant stops, goal-vs-price timing | `live_feed.py` (`LIVE_FEED=0` turns it off) |
 | Wiping paper trades (archive first, then clear) | `paper_trading.RESET_ID`, `wipe` |

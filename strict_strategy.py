@@ -211,7 +211,12 @@ def settle(sec, trade, payout, now):
 
 
 def signals_enabled():
-    return (os.environ.get("BUY_SIGNALS") or "").strip() != "0"
+    """Off while the 70-match trial runs (the owner buys nothing then), unless BUY_SIGNALS=1."""
+    import trial
+    setting = (os.environ.get("BUY_SIGNALS") or "").strip()
+    if setting in ("0", "1"):
+        return setting == "1"
+    return not (trial.enabled() and not trial.STATE["done"])
 
 
 def signal_usd():
