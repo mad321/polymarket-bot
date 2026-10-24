@@ -11,6 +11,7 @@ from unittest import mock
 
 os.environ["ENABLE_MONITOR"] = "0"
 os.environ["JOURNAL"] = "0"  # the trade journal reads the network; its tests are in test_journal.py
+os.environ["TRIAL"] = "0"  # the 70-match trial has its own tests (test_trial.py)
 
 import exposure
 import polymarket_monitor as monitor

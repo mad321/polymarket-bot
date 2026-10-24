@@ -51,6 +51,8 @@ import live_feed
 import positions as positions_module
 import stop_review
 import strict_strategy
+import trial
+import odds
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +141,7 @@ def alerts_enabled():
 
 
 def active():
-    return enabled() or alerts_enabled() or strict_strategy.enabled()
+    return enabled() or alerts_enabled() or strict_strategy.enabled() or trial.enabled()
 
 
 def covers(pos):
@@ -314,6 +316,11 @@ def plan(ledger, now):
         settle += strict["settle"]
         # a game is still a candidate while either test has not decided on it
         entered = strict["entered"] if entered is None else entered & strict["entered"]
+    if trial.enabled():
+        t = trial.plan(ledger, now)
+        live.update(t["live"])
+        settle += t["settle"]
+        entered = t["entered"] if entered is None else entered & t["entered"]
     return {"live": live, "settle": settle, "entered": entered or set()}
 
 
@@ -324,10 +331,12 @@ def fetch(plan_, now):
     try:
         if _schedule_at is None or now - _schedule_at >= SCHEDULE_EVERY:
             _schedule, _schedule_at = fetch_schedule(now), now
-        testing = enabled() or strict_strategy.enabled()
+        testing = enabled() or strict_strategy.enabled() or trial.enabled()
         candidates = [g for g in _schedule.values() if testing
                       and g["slug"] not in plan_["entered"] and g["start"] - ENTRY_WINDOW <= now < g["start"]]
         data["candidates"] = [g["slug"] for g in candidates]
+        if trial.enabled() and odds.enabled():  # bookmakers' chances for the trial's edge
+            data["odds"] = {g["slug"]: odds.lookup(g) for g in candidates}
         if candidates and strict_strategy.enabled() and strict_strategy.signals_enabled():
             import exposure
             data["capital"] = exposure.capital()  # sizes the buy signals
@@ -479,6 +488,8 @@ def apply(ledger, data, now, tz):
         messages += strict_strategy.apply(strict, data, now)  # buy signals
         messages += strict_strategy.morning(strict, _schedule.values(), now, tz)
         messages += strict_strategy.digest(strict, now, tz)
+    if trial.enabled():
+        messages += trial.apply(ledger, data, now, tz)
     if not enabled():
         STATE.update(last_scan_at=_iso(now))
         return messages
@@ -531,12 +542,10 @@ def apply(ledger, data, now, tz):
 # ─── ALERTS ON YOUR POSITIONS ────────────────────────────────────────────────
 
 ALERTS_INTRO = (
-    "🛡️ تنبيهات صفقاتك الحقيقية تتبع الآن الميزان الصارم 3.0.\n"
-    "لكل صفقة \"هل سيفوز الفريق؟ نعم\" في الدوريات المختارة، يتابع البوت المباراة كل دقيقة ويرسل تنبيهاً عند: "
-    "وصول السعر إلى +20% من سعر شرائك (الهدف)، أو نزوله 20% عنه (الوقف). "
-    "لا تنبيه بالدقيقة 65 ولا عند الهدف بعد الآن.\n"
-    "كل تنبيه مرة واحدة، ومعه كم ستستلم لو بعت الآن. صفقات محفظة البوت يأتي معها زر البيع. "
-    "البوت لا يبيع ولا يضع أوامر بنفسه."
+    "⭐ الاستراتيجية 3.1: نحتفظ بالصفقة حتى نهاية المباراة.\n"
+    "توقفت تنبيهات +20% و−20% على صفقاتك: سجلك يقول إن البيع المبكر عند الربح والبيع عند الهبوط "
+    "كلّفاك أكثر من الاحتفاظ. حجم الصفقة الصغير ($5) هو وقف الخسارة.\n"
+    "إن كان البيع التلقائي عند −20% مفعلاً (AUTO_STOP=1) فسيستمر ويُبلغك، وننصح بإطفائه: AUTO_STOP=0 في Render."
 )
 
 
@@ -555,8 +564,8 @@ def position_alerts(ledger, data, now):
     """Alerts on your covered positions, each rule once per position."""
     sec = section(ledger)
     messages = []
-    if not sec.get("alerts_intro_v3"):
-        sec["alerts_intro_v3"] = _iso(now)
+    if not sec.get("alerts_intro_v31"):
+        sec["alerts_intro_v31"] = _iso(now)
         messages.append(ALERTS_INTRO)
     sent = sec.setdefault("alerted", {})
     for key, at in list(sent.items()):
@@ -569,10 +578,11 @@ def position_alerts(ledger, data, now):
             continue
         book = data["books"].get(token) or {}
         rule = alert_rule(float(pos.get("buy_price") or 0) / 100, game, mid_price(book))
-        if rule is None:
+        # Strategy 3.1 (2026-10-24) holds to the end: no +20% / -20% advice. Only a
+        # stop the bot is selling by itself (AUTO_STOP=1) is announced.
+        if rule != "stop" or not auto_stop.applies(pos):
             continue
-        if rule == "stop" and auto_stop.applies(pos):
-            auto_stop.request(pos, mid_price(book))  # retried every minute until sold
+        auto_stop.request(pos, mid_price(book))  # retried until sold
         key = f"{pos.get('wallet', '')}:{token}:{rule}"
         if key in sent:
             continue

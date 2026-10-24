@@ -12,6 +12,7 @@ from unittest import mock
 
 os.environ["ENABLE_MONITOR"] = "0"
 os.environ["JOURNAL"] = "0"
+os.environ["TRIAL"] = "0"  # the 70-match trial has its own tests (test_trial.py)
 
 import paper_trading as pt
 import trade_journal as tj

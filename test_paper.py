@@ -15,6 +15,7 @@ from unittest import mock
 
 os.environ["ENABLE_MONITOR"] = "0"
 os.environ["JOURNAL"] = "0"  # the trade journal reads the network; its tests are in test_journal.py
+os.environ["TRIAL"] = "0"  # the 70-match trial has its own tests (test_trial.py)
 os.environ["MATCH_TEST"] = "0"    # the football test and alerts have their own tests (test_match.py)
 os.environ["MATCH_ALERTS"] = "0"
 os.environ["STRICT_TEST"] = "0"   # strategy 3.0 has its own tests (test_strict.py)

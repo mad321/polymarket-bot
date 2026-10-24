@@ -13,6 +13,7 @@ from unittest import mock
 
 os.environ["ENABLE_MONITOR"] = "0"
 os.environ["JOURNAL"] = "0"  # the trade journal reads the network; its tests are in test_journal.py
+os.environ["TRIAL"] = "0"  # the 70-match trial has its own tests (test_trial.py)
 
 import auto_stop
 import match_strategy as ms
@@ -140,7 +141,7 @@ class AlertTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.ledger = pt.new_ledger(KICKOFF)
-        ms.section(self.ledger)["alerts_intro_v3"] = "x"
+        ms.section(self.ledger)["alerts_intro_v31"] = "x"
         ms._schedule = {"epl-che-bou-2026-10-10": game()}
         self.addCleanup(setattr, ms, "_schedule", {})
 
@@ -159,16 +160,11 @@ class AlertTests(unittest.TestCase):
         self.assertIsInstance(msgs[0], str)  # no button: the bot is already selling
         self.assertIn("🤖 البوت يبيع كل الأسهم الآن تلقائياً", msgs[0])
 
-    def test_other_wallets_and_the_target_keep_the_manual_flow(self):
+    def test_other_wallets_and_the_target_get_no_advice(self):
         with mock.patch("auto_stop.request") as request:
-            msgs = self.tick(my_pos(wallet=MAIN), 30, 0.41, 0.43)
-            self.assertIn("القرار لك", msgs[0])
-            msgs = self.tick(my_pos(wallet=BOT, token="yH"), 40, 0.75, 0.77)  # +20%: target
+            self.assertEqual(self.tick(my_pos(wallet=MAIN), 30, 0.41, 0.43), [])  # no key: nothing to sell
+            self.assertEqual(self.tick(my_pos(wallet=BOT, token="yH"), 40, 0.75, 0.77), [])  # +20%: hold
         request.assert_not_called()
-        text, markup = msgs[0]
-        self.assertIn("🟢", text)
-        self.assertEqual(markup["inline_keyboard"][0][0]["text"], "🔴 بيع الآن")
-
 
 if __name__ == "__main__":
     unittest.main()
