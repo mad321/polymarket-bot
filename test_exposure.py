@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 
 os.environ["ENABLE_MONITOR"] = "0"
+os.environ["JOURNAL"] = "0"  # the trade journal reads the network; its tests are in test_journal.py
 
 import exposure
 import polymarket_monitor as monitor

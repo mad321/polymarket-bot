@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 os.environ["ENABLE_MONITOR"] = "0"
+os.environ["JOURNAL"] = "0"  # the trade journal reads the network; its tests are in test_journal.py
 os.environ["STRICT_TEST"] = "0"  # strategy 3.0 has its own tests (test_strict.py)
 
 import pytz

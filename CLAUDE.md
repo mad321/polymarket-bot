@@ -36,13 +36,14 @@ trading results. Add to it when you learn something (see "Lessons" below).
      (`TRADING_PRIVATE_KEY`, `TRADING_PRIVATE_KEY_2`). Never ask for a key or
      the 12 words in chat, never log or return them; errors go through
      `trading._redact`.
-   - Public pages (`/api/positions`, `/api/alerts/status`, `/api/paper`) must
-     never show keys or balances.
+   - Public pages (`/`, `/api/positions`, `/api/alerts/status`, `/api/paper`)
+     must never show keys or balances. Balances and the trade journal appear
+     only on the owner's link (`/?key=` + `DASHBOARD_KEY`, then a cookie).
    - No VPN or geoblock workarounds.
 5. **Tests before every push**, and they must not touch the network:
 
    ```bash
-   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py test_auto_stop.py test_restore.py test_live.py
+   python -m unittest test_alerts.py test_trading.py test_paper.py test_exposure.py test_match.py test_alert_memory.py test_strict.py test_auto_stop.py test_restore.py test_live.py test_journal.py
    ```
 
    A suite that suddenly takes seconds is calling the internet: mock it.
@@ -67,6 +68,8 @@ trading results. Add to it when you learn something (see "Lessons" below).
 | Position size alert | `exposure.py` |
 | Alert cooldowns kept across restarts | `alert_memory.py` |
 | Paper results as JSON | `GET /api/paper` |
+| Trade journal: what each closed real trade teaches (groups, win-rate ranges, holding instead) | `trade_journal.py` (`JOURNAL=0` off) |
+| Private part of the bot's page: wallet value, cash, the journal | `polymarket_bot._private_figures` (`/?key=DASHBOARD_KEY`) |
 
 ## Lessons
 

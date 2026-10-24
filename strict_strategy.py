@@ -52,6 +52,7 @@ import unicodedata
 from datetime import timedelta
 
 import match_strategy as ms
+import trade_journal
 import stop_review
 
 ENTRY_RANGE = (0.55, 0.72)
@@ -368,7 +369,11 @@ def dashboard(sec):
             "stops": sum((t.get("exit") or {}).get("rule") == "stop" for t in closed),
             "held": sum("exit" not in t for t in closed),
             "skipped_volume": skipped.get("volume", 0), "skipped_price": skipped.get("price", 0),
-            "goal": WIN_RATE_GOAL * 100, "break_even": 57, "rows": rows}
+            "goal": WIN_RATE_GOAL * 100, "break_even": 57, "rows": rows,
+            "indicators": {
+                "strategy": trade_journal.indicator(len(closed), wins, pnl, paid),
+                "hold": trade_journal.indicator(len(closed), sum(t.get("hold_pnl", 0) > 0 for t in closed), hold, paid),
+            }}
 
 
 def summary_lines(ledger):
