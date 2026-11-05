@@ -653,6 +653,7 @@ def alerts_status():
     import auto_stop
     import live_feed
     import odds
+    import trade_journal
     import trial
     import exposure
     import match_strategy
@@ -669,6 +670,7 @@ def alerts_status():
         "auto_stop": auto_stop.status(),
         "live_feed": live_feed.status(),
         "trial": trial.STATE,
+        "journal": trade_journal.STATE,
         "odds": {**odds.STATE, "enabled": odds.enabled()},
         "paper_trading": paper_trading.STATE,
         "position_size": exposure.STATE,

@@ -69,15 +69,30 @@ def _football(row):
 
 # ─── READING ─────────────────────────────────────────────────────────────────
 
+def _v1_shape(x):
+    """A Data API v2 activity row in the field names the journal reads."""
+    return {"type": x.get("type"), "side": x.get("side"), "size": x.get("size"), "usdcSize": x.get("usdc_size"),
+            "asset": x.get("token_id"), "title": x.get("title"), "eventSlug": x.get("event_slug"),
+            "outcome": x.get("outcome"), "timestamp": x.get("timestamp")}
+
+
 def fetch_activity(wallet, since=SINCE, page=500, max_pages=20):
-    rows = []
-    for i in range(max_pages):
-        r = requests.get(f"{DATA_API}/activity", params={"user": wallet, "limit": page, "offset": i * page},
-                         timeout=20)
+    """The wallet's activity since `since`, newest first, from Data API v2
+    (v1 was retired on 2026-10-24 and answers only with an error)."""
+    rows, cursor = [], None
+    for _ in range(max_pages):
+        params = {"user": wallet, "limit": page}
+        if cursor:
+            params["cursor"] = cursor
+        r = requests.get(f"{DATA_API}/v2/activity", params=params, timeout=20)
         r.raise_for_status()
-        batch = r.json()
-        rows += [x for x in batch if int(x.get("timestamp") or 0) >= since]
-        if len(batch) < page or int(batch[-1].get("timestamp") or 0) < since:
+        body = r.json()
+        batch = body.get("data")
+        if not isinstance(batch, list):
+            raise ValueError(f"unexpected activity answer: {str(body)[:120]}")
+        rows += [_v1_shape(x) for x in batch if int(x.get("timestamp") or 0) >= since]
+        cursor = (body.get("pagination") or {}).get("next_cursor")
+        if not cursor or not batch or int(batch[-1].get("timestamp") or 0) < since:
             break
     return rows
 

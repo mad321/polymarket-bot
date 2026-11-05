@@ -77,6 +77,35 @@ class PositionTests(unittest.TestCase):
         self.assertEqual(table[("الفريق", "من قائمة النخبة")]["verdict"], "يخسر")
 
 
+class ActivityTests(unittest.TestCase):
+    def test_reads_data_api_v2_with_its_cursor(self):
+        page1 = {"data": [{"type": "TRADE", "side": "SELL", "size": 13.0, "usdc_size": 11.37, "token_id": "t1",
+                           "title": "Will Al Ittihad Saudi Club win on 2026-10-30?", "event_slug": "spl-abh-ith-2026-10-30",
+                           "outcome": "Yes", "timestamp": T + 100}],
+                 "pagination": {"next_cursor": "abc"}}
+        page2 = {"data": [{"type": "TRADE", "side": "BUY", "size": 13.0, "usdc_size": 9.1, "token_id": "t1",
+                           "title": "Will Al Ittihad Saudi Club win on 2026-10-30?", "event_slug": "spl-abh-ith-2026-10-30",
+                           "outcome": "Yes", "timestamp": T}],
+                 "pagination": {"next_cursor": None}}
+        answers = [mock.Mock(json=mock.Mock(return_value=p), raise_for_status=mock.Mock()) for p in (page1, page2)]
+        with mock.patch("trade_journal.requests.get", side_effect=answers) as get:
+            rows = tj.fetch_activity(W, since=T - 1)
+        self.assertEqual(get.call_args_list[0].args[0], "https://data-api.polymarket.com/v2/activity")
+        self.assertEqual(get.call_args_list[1].kwargs["params"]["cursor"], "abc")
+        ps = tj.positions_from(rows, W)
+        p = ps[f"{W}:t1"]
+        self.assertEqual((p["bought"], round(p["cost"], 2), round(p["proceeds"], 2), p["event"]),
+                         (13.0, 9.1, 11.37, "spl-abh-ith-2026-10-30"))
+        self.assertTrue(tj.closed(p))
+
+    def test_an_error_answer_is_an_error_not_an_empty_history(self):
+        retired = {"error": "Data API v1 has been retired"}
+        with mock.patch("trade_journal.requests.get",
+                        return_value=mock.Mock(json=mock.Mock(return_value=retired), raise_for_status=mock.Mock())):
+            with self.assertRaises(ValueError):
+                tj.fetch_activity(W)
+
+
 class IndicatorTests(unittest.TestCase):
     def test_verdicts(self):
         self.assertEqual(tj.indicator(4, 2, -5.65, 101)["status"], "مبكر للحكم")
